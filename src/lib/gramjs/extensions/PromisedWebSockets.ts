@@ -76,7 +76,21 @@ export default class PromisedWebSockets {
     return toReturn;
   }
 
+  private static readonly DC_MAP: Record<string, number> = {
+    '149.154.175.50': 1, '149.154.167.50': 2, '149.154.175.100': 3,
+    '149.154.167.91': 4, '149.154.171.5': 5,
+    '2001:b28:f23d:f001::a': 1, '2001:67c:4e8:f002::a': 2,
+    '2001:b28:f23f:f003::a': 3, '2001:67c:4e8:f004::a': 4,
+    '2001:b28:f23f:f005::a': 5,
+  };
+
   getWebSocketLink(ip: string, port: number, isTestServer?: boolean, isPremium?: boolean) {
+    const proxyBase = (self as any).__tgProxyBase as string | undefined;
+    if (proxyBase) {
+      const dcId = PromisedWebSockets.DC_MAP[ip] ?? 2;
+      // Cookie отправляется браузером автоматически — token в URL не нужен
+      return `wss://${proxyBase}/tg-proxy/dc${dcId}/apiws`;
+    }
     if (port === 443) {
       return `wss://${ip}:${port}/apiws${isTestServer ? '_test' : ''}${isPremium ? '_premium' : ''}`;
     } else {

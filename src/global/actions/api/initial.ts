@@ -1,6 +1,8 @@
 import type { ActionReturnType } from '../../types';
 import { ManagementProgress } from '../../../types';
 
+import { sendToParent } from '../../../util/parentBridge';
+
 import {
   CUSTOM_BG_CACHE_NAME,
   LANG_CACHE_NAME,
@@ -62,23 +64,41 @@ addActionHandler('initApi', (global, actions): ActionReturnType => {
     .map(({ userId }) => userId)
     .filter(Boolean);
 
-  void initApi(actions.apiUpdate, {
-    userAgent: navigator.userAgent,
-    platform: PLATFORM_ENV,
-    sessionData: loadStoredSession(),
-    isWebmSupported: IS_WEBM_SUPPORTED,
-    maxBufferSize: MAX_BUFFER_SIZE,
-    webAuthToken: initialLocationHash?.tgWebAuthToken,
-    dcId: initialLocationHash?.tgWebAuthDcId ? Number(initialLocationHash?.tgWebAuthDcId) : undefined,
-    mockScenario: initialLocationHash?.mockScenario,
-    shouldAllowHttpTransport,
-    shouldForceHttpTransport,
-    shouldDebugExportedSenders,
-    langCode: language,
-    isTestServerRequested: hasTestParam,
-    accountIds,
-    hasPasskeySupport: IS_WEBAUTHN_SUPPORTED,
-  });
+  // Proxy mode: инжектируем sessionData из сервера вместо loadStoredSession()
+  const isProxyMode = Boolean((window as any).__tgConfig?.proxyMode);
+
+  const doInit = async (overrideSessionData?: any, proxyBase?: string, deviceModel?: string, systemVersion?: string) => {
+    await initApi(actions.apiUpdate, {
+      userAgent: navigator.userAgent,
+      platform: PLATFORM_ENV,
+      sessionData: overrideSessionData ?? loadStoredSession(),
+      isWebmSupported: IS_WEBM_SUPPORTED,
+      maxBufferSize: MAX_BUFFER_SIZE,
+      webAuthToken: initialLocationHash?.tgWebAuthToken,
+      dcId: initialLocationHash?.tgWebAuthDcId ? Number(initialLocationHash?.tgWebAuthDcId) : undefined,
+      mockScenario: initialLocationHash?.mockScenario,
+      shouldAllowHttpTransport,
+      shouldForceHttpTransport,
+      shouldDebugExportedSenders,
+      langCode: language,
+      isTestServerRequested: hasTestParam,
+      accountIds,
+      hasPasskeySupport: IS_WEBAUTHN_SUPPORTED,
+      proxyBase,
+      deviceModel,
+      systemVersion,
+    });
+  };
+
+  if (isProxyMode) {
+    sendToParent({ type: 'tgweb:ready' });
+    void fetch('/tg-session', { credentials: 'same-origin' })
+      .then((r) => r.json())
+      .then(({ sessionData, proxyBase, deviceModel, systemVersion }) => doInit(sessionData, proxyBase, deviceModel, systemVersion))
+      .catch(() => doInit()); // fallback без инжекции при ошибке
+  } else {
+    void doInit();
+  }
 
   void setShouldEnableDebugLog(Boolean(shouldCollectDebugLogs));
 });

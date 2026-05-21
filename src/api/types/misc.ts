@@ -32,6 +32,11 @@ export interface ApiInitialArgs {
   isTestServerRequested?: boolean;
   accountIds?: string[];
   hasPasskeySupport?: boolean;
+  proxyBase?: string;
+  /** GoLogin UA — используется как deviceModel в MTProto initConnection вместо navigator.userAgent */
+  deviceModel?: string;
+  /** GoLogin platform — используется как systemVersion в MTProto initConnection */
+  systemVersion?: string;
 }
 
 export type ApiPasskeyOption = {

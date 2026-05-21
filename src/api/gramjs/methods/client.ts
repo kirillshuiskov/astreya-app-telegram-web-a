@@ -92,8 +92,12 @@ export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoid
     userAgent, platform, sessionData, isWebmSupported, maxBufferSize, webAuthToken, dcId,
     mockScenario, shouldForceHttpTransport, shouldAllowHttpTransport,
     shouldDebugExportedSenders, langCode, isTestServerRequested, accountIds,
-    hasPasskeySupport,
+    hasPasskeySupport, proxyBase, deviceModel: injectedDeviceModel, systemVersion: injectedSystemVersion,
   } = initialArgs;
+
+  if (proxyBase) {
+    (self as any).__tgProxyBase = proxyBase;
+  }
 
   const session = new sessions.CallbackSession(sessionData, onSessionUpdate);
 
@@ -106,8 +110,9 @@ export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoid
     Number(process.env.TELEGRAM_API_ID),
     process.env.TELEGRAM_API_HASH,
     {
-      deviceModel: navigator.userAgent || userAgent || DEFAULT_USER_AGENT,
-      systemVersion: platform || DEFAULT_PLATFORM,
+      // В proxy mode используем GoLogin UA для совпадения fingerprint с GoLogin профилем
+      deviceModel: injectedDeviceModel || navigator.userAgent || userAgent || DEFAULT_USER_AGENT,
+      systemVersion: injectedSystemVersion || platform || DEFAULT_PLATFORM,
       appVersion: `${APP_VERSION} ${APP_CODE_NAME}`,
       useWSS: true,
       additionalDcsDisabled: IS_TEST,
