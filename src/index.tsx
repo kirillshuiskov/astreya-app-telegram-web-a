@@ -1,6 +1,10 @@
 import './util/handleError';
 import './util/setupServiceWorker';
 import './global/init';
+// B2B automation API: window.__b2b + 'b2b:send' command над proxyBridge.
+// Регистрирует window.__b2b и onParentMessage-обработчик на старте — даже если
+// B2B-host не подключён, никаких побочных эффектов (postMessage только при наличии parent).
+import './util/b2bAutomationApi';
 
 import TeactDOM from './lib/teact/teact-dom';
 import {

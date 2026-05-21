@@ -11,12 +11,19 @@ export type BridgeMessage =
   | { type: 'connectionState'; state: 'connectionStateConnecting' | 'connectionStateReady' | 'connectionStateDisconnected' }
   | { type: 'authState'; state: 'authorizationStateReady' | 'authorizationStateUnauthorized' | 'authorizationStateClosed' }
   | { type: 'mtprotoSenderLogs'; logs: Array<{ level: 'info' | 'warn' | 'error'; message: string; dcId?: number; ts: number }> }
-  | { type: 'accountChanged'; accountId: string; ok: boolean; error?: string };
+  | { type: 'accountChanged'; accountId: string; ok: boolean; error?: string }
+  // B2B automation:
+  // - b2b:sendResult — ответ на incoming команду 'b2b:send' (см. b2bAutomationApi.ts)
+  // - b2b:authInvalid — сигнал об auth-killing ошибке MTProto (AUTH_KEY_UNREGISTERED и пр.),
+  //   эмитится из api/gramjs клиента ДО локального logout, чтобы host успел показать UI переподключения
+  | { type: 'b2b:sendResult'; requestId: string; ok: boolean; messageId?: number; error?: string }
+  | { type: 'b2b:authInvalid'; errorType: string; code: number };
 
 /** Сообщения host → iframe */
 export type BridgeIncomingMessage =
   | (SessionPayload & { type: 'sessionResponse' })
-  | { type: 'setAccount'; accountId: string; workspaceId: string };
+  | { type: 'setAccount'; accountId: string; workspaceId: string }
+  | { type: 'b2b:send'; requestId: string; username: string; text: string };
 
 export type SessionPayload = {
   requestId: string;
