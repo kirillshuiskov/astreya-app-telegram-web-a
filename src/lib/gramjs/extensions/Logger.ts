@@ -1,10 +1,43 @@
+import { sendToParent } from '../../../util/proxyBridge';
+
 export type LoggerLevel = 'error' | 'warn' | 'info' | 'debug';
 
 let _level: LoggerLevel;
 
+const BRIDGE_BUFFER_CAP = 200;
+const BRIDGE_FLUSH_MS = 5000;
+
+/** Не отправляем в host чувствительные MTProto данные */
+function sanitizeForBridge(message: string): string | null {
+  const m = message.trim();
+  if (!m) return null;
+  const lower = m.toLowerCase();
+  if (/auth[_\s-]?key|server_salt|encrypted\s+messages?\s+put/i.test(lower)) return null;
+  if (/[0-9a-f]{48,}/i.test(m)) return null;
+  return m.length > 400 ? `${m.slice(0, 400)}…` : m;
+}
+
+function extractDcId(message: string): number | undefined {
+  const patterns = [
+    /for dc\s+(\d+)/i,
+    /dc\s*[=:]\s*(\d+)/i,
+    /dcid=(\d+)/i,
+    /\bdc\s+(\d+)\b/i,
+  ];
+  for (const re of patterns) {
+    const x = message.match(re);
+    if (x) return Number(x[1]);
+  }
+  return undefined;
+}
+
 type ColorKey = LoggerLevel | 'start' | 'end';
 
 export default class Logger {
+  private static bridgeBuffer: Array<{ level: 'info' | 'warn' | 'error'; message: string; dcId?: number; ts: number }> = [];
+
+  private static bridgeFlushTimer: ReturnType<typeof setInterval> | undefined;
+
   static LEVEL_MAP = new Map<LoggerLevel, Set<LoggerLevel>>([
     ['error', new Set(['error'])],
     ['warn', new Set(['error', 'warn'])],
@@ -34,6 +67,34 @@ export default class Logger {
 
   static setLevel(level: LoggerLevel) {
     _level = level;
+  }
+
+  private static ensureBridgeFlushInterval() {
+    if (Logger.bridgeFlushTimer !== undefined) return;
+    if (typeof self === 'undefined' || !(self as unknown as { __tgProxyBridge?: boolean }).__tgProxyBridge) {
+      return;
+    }
+    Logger.bridgeFlushTimer = setInterval(() => Logger.flushBridgeBuffer(), BRIDGE_FLUSH_MS);
+  }
+
+  private static pushBridgeRecord(level: 'info' | 'warn' | 'error', rawMessage: string) {
+    if (typeof self === 'undefined' || !(self as unknown as { __tgProxyBridge?: boolean }).__tgProxyBridge) {
+      return;
+    }
+    const message = sanitizeForBridge(rawMessage);
+    if (!message) return;
+    const dcId = extractDcId(rawMessage);
+    Logger.bridgeBuffer.push({ level, message, dcId, ts: Date.now() });
+    while (Logger.bridgeBuffer.length > BRIDGE_BUFFER_CAP) {
+      Logger.bridgeBuffer.shift();
+    }
+    Logger.ensureBridgeFlushInterval();
+  }
+
+  static flushBridgeBuffer() {
+    if (!Logger.bridgeBuffer.length) return;
+    const logs = Logger.bridgeBuffer.splice(0, Logger.bridgeBuffer.length);
+    sendToParent({ type: 'mtprotoSenderLogs', logs });
   }
 
   canSend(level: LoggerLevel) {
@@ -70,6 +131,10 @@ export default class Logger {
     if (this.canSend(level)) {
       // eslint-disable-next-line no-console
       console.log(this.colors.start + this.format(message, level), color);
+    }
+    // В телеметрию только заметные уровни (без debug — шум)
+    if (level === 'info' || level === 'warn' || level === 'error') {
+      Logger.pushBridgeRecord(level, message);
     }
   }
 }

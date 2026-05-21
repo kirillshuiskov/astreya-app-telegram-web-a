@@ -82,14 +82,40 @@ export default class PromisedWebSockets {
     '2001:b28:f23d:f001::a': 1, '2001:67c:4e8:f002::a': 2,
     '2001:b28:f23f:f003::a': 3, '2001:67c:4e8:f004::a': 4,
     '2001:b28:f23f:f005::a': 5,
+    'zws1.web.telegram.org': 1, 'zws2.web.telegram.org': 2,
+    'zws3.web.telegram.org': 3, 'zws4.web.telegram.org': 4,
+    'zws5.web.telegram.org': 5,
+    'zws1-1.web.telegram.org': 1, 'zws2-1.web.telegram.org': 2,
+    'zws3-1.web.telegram.org': 3, 'zws4-1.web.telegram.org': 4,
+    'zws5-1.web.telegram.org': 5,
   };
+
+  private static resolveDcId(ip: string): number | undefined {
+    const fromMap = PromisedWebSockets.DC_MAP[ip];
+    if (fromMap) return fromMap;
+    // Fallback для DC-хостов формата zwsN.web.telegram.org и zwsN-1.web.telegram.org (downloadDC).
+    // Без него non-home соединения уходили на /tg-proxy/dc2 и ломали auth (-404 / AUTH_BYTES_INVALID).
+    const m = String(ip).match(/^zws(\d)(?:-\d)?\.web\.telegram\.org$/);
+    return m ? parseInt(m[1], 10) : undefined;
+  }
 
   getWebSocketLink(ip: string, port: number, isTestServer?: boolean, isPremium?: boolean) {
     const proxyBase = (self as any).__tgProxyBase as string | undefined;
     if (proxyBase) {
-      const dcId = PromisedWebSockets.DC_MAP[ip] ?? 2;
-      // Cookie отправляется браузером автоматически — token в URL не нужен
-      return `wss://${proxyBase}/tg-proxy/dc${dcId}/apiws`;
+      const dcId = PromisedWebSockets.resolveDcId(ip) ?? 2;
+      // Определяем протокол по контексту воркера: blob:-воркеры смотрят в href родителя.
+      // Cookie отправляется браузером автоматически — token в URL не нужен.
+      const proto = (() => {
+        try {
+          const loc = (self as any).location;
+          if (!loc) return 'wss:';
+          if (loc.protocol === 'blob:') {
+            return (loc.href as string).startsWith('blob:https:') ? 'wss:' : 'ws:';
+          }
+          return loc.protocol === 'https:' ? 'wss:' : 'ws:';
+        } catch { return 'wss:'; }
+      })();
+      return `${proto}//${proxyBase}/tg-proxy/dc${dcId}/apiws`;
     }
     if (port === 443) {
       return `wss://${ip}:${port}/apiws${isTestServer ? '_test' : ''}${isPremium ? '_premium' : ''}`;

@@ -41,6 +41,11 @@ export type WorkerPayload =
     type: 'debugLog';
     level: DebugLevel;
     args: any[];
+  }
+  |
+  {
+    type: 'proxyBridgeOut';
+    msg: Record<string, unknown>;
   };
 
 export type WorkerMessageData = {

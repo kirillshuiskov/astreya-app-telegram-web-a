@@ -68,6 +68,10 @@ import {
 import downloadMediaWithClient, { parseMediaUrl } from './media';
 
 import { ChatAbortController } from '../ChatAbortController';
+import { UpdateConnectionState } from '../../../lib/gramjs/network/updates';
+import { sendToParent } from '../../../util/proxyBridge';
+import type { ApiUpdate } from '../../types';
+import * as apiUpdateEmitter from '../updates/apiUpdateEmitter';
 
 const DEFAULT_USER_AGENT = 'Unknown UserAgent';
 const DEFAULT_PLATFORM = 'Unknown platform';
@@ -81,6 +85,35 @@ const ABORT_CONTROLLERS = new Map<string, AbortController>();
 
 let client: TelegramClient;
 let currentUserId: string | undefined;
+/** Proxy-mode GramJS: есть proxyBase в последнем init */
+let lastProxyBaseForBridge: string | undefined;
+let proxyBridgeSendApiPatchInstalled = false;
+
+function installProxyBridgeSendApiPatch(proxyBase: string | undefined) {
+  if (!proxyBase || proxyBridgeSendApiPatchInstalled) return;
+  proxyBridgeSendApiPatchInstalled = true;
+  (self as unknown as { __tgProxyBridge?: boolean }).__tgProxyBridge = true;
+
+  const mod = apiUpdateEmitter as unknown as { sendApiUpdate: (u: ApiUpdate) => void };
+  const origSendApiUpdate = mod.sendApiUpdate.bind(apiUpdateEmitter);
+  mod.sendApiUpdate = (update: ApiUpdate) => {
+    if (update['@type'] === 'updateAuthorizationState') {
+      const st = (update as { authorizationState?: string }).authorizationState;
+      if (st === 'authorizationStateReady') {
+        sendToParent({ type: 'authState', state: 'authorizationStateReady' });
+      } else {
+        sendToParent({ type: 'authState', state: 'authorizationStateUnauthorized' });
+      }
+    }
+    if (update['@type'] === 'updateConnectionState') {
+      const cs = (update as { connectionState?: string }).connectionState;
+      if (cs === 'connectionStateBroken') {
+        sendToParent({ type: 'authState', state: 'authorizationStateUnauthorized' });
+      }
+    }
+    origSendApiUpdate(update);
+  };
+}
 
 export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoidFunction) {
   if (DEBUG) {
@@ -94,6 +127,9 @@ export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoid
     shouldDebugExportedSenders, langCode, isTestServerRequested, accountIds,
     hasPasskeySupport, proxyBase, deviceModel: injectedDeviceModel, systemVersion: injectedSystemVersion,
   } = initialArgs;
+
+  lastProxyBaseForBridge = proxyBase;
+  installProxyBridgeSendApiPatch(proxyBase);
 
   if (proxyBase) {
     (self as any).__tgProxyBase = proxyBase;
@@ -140,6 +176,9 @@ export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoid
 
     try {
       client.setPingCallback(getDifference);
+      if (proxyBase) {
+        sendToParent({ type: 'connectionState', state: 'connectionStateConnecting' });
+      }
       await client.start({
         phoneNumber: onRequestPhoneNumber,
         phoneCode: onRequestCode,
@@ -231,6 +270,15 @@ function onSessionUpdate(sessionData?: ApiSessionData) {
 type UpdateConfig = GramJs.UpdateConfig & { _entities?: (GramJs.TypeUser | GramJs.TypeChat)[] };
 
 export function handleGramJsUpdate(update: any) {
+  if (lastProxyBaseForBridge && update instanceof UpdateConnectionState) {
+    if (update.state === UpdateConnectionState.connected) {
+      sendToParent({ type: 'connectionState', state: 'connectionStateReady' });
+    } else if (update.state === UpdateConnectionState.disconnected
+      || update.state === UpdateConnectionState.broken) {
+      sendToParent({ type: 'connectionState', state: 'connectionStateDisconnected' });
+    }
+  }
+
   processUpdate(update);
 
   if (update instanceof GramJs.UpdatesTooLong) {

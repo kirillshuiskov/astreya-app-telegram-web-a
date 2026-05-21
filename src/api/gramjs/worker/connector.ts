@@ -13,6 +13,7 @@ import { getCurrentTabId, subscribeToMasterChange } from '../../../util/establis
 import generateUniqueId from '../../../util/generateUniqueId';
 import { ACCOUNT_SLOT, DATA_BROADCAST_CHANNEL_NAME } from '../../../util/multiaccount';
 import { pause, throttleWithTickEnd } from '../../../util/schedulers';
+import { sendToParent } from '../../../util/proxyBridge';
 
 type RequestState = {
   messageId: string;
@@ -305,6 +306,8 @@ function subscribeToWorker(onUpdate: OnApiUpdate) {
         navigator.sendBeacon(payload.url, payload.data);
       } else if (payload.type === 'debugLog') {
         logDebugMessage(payload.level, ...payload.args);
+      } else if (payload.type === 'proxyBridgeOut') {
+        sendToParent(payload.msg as Parameters<typeof sendToParent>[0]);
       }
     });
   });

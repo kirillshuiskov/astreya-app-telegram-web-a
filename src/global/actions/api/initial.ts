@@ -1,8 +1,6 @@
 import type { ActionReturnType } from '../../types';
 import { ManagementProgress } from '../../../types';
 
-import { sendToParent } from '../../../util/parentBridge';
-
 import {
   CUSTOM_BG_CACHE_NAME,
   LANG_CACHE_NAME,
@@ -34,6 +32,11 @@ import { forceWebsync } from '../../../util/websync';
 import {
   callApi, callApiLocal, initApi, setShouldEnableDebugLog,
 } from '../../../api/gramjs';
+import {
+  sendToParent,
+  onParentMessage,
+  requestSessionFromParent,
+} from '../../../util/proxyBridge';
 import { removeGlobalFromCache, removeSharedStateFromCache, serializeGlobal } from '../../cache';
 import {
   addActionHandler, getGlobal, setGlobal,
@@ -44,6 +47,56 @@ import {
 import { updateAuth } from '../../reducers/auth';
 import { selectSharedSettings } from '../../selectors/sharedState';
 import { destroySharedStatePort } from '../../shared/sharedStateConnector';
+
+/** Последний запуск proxy init — для setAccount без повторной регистрации handler */
+let lastProxyGramJsInit: (() => Promise<void>) | undefined;
+
+let exclusiveChain = Promise.resolve();
+
+/** Очередь: гонка init vs setAccount недопустима */
+function runExclusive(fn: () => Promise<void>): Promise<void> {
+  const next = exclusiveChain.then(() => fn());
+  exclusiveChain = next.then(() => undefined).catch(() => undefined);
+  return next;
+}
+
+async function requestSessionWithFallback(): Promise<{
+  sessionData: any;
+  proxyBase: string;
+  deviceModel?: string;
+  systemVersion?: string;
+}> {
+  try {
+    return await requestSessionFromParent(10000);
+  } catch {
+    const r = await fetch('/tg-session', { credentials: 'same-origin' });
+    if (!r.ok) throw new Error(`tg-session_http_${r.status}`);
+    return r.json();
+  }
+}
+
+if (typeof window !== 'undefined' && (window as any).__tgConfig?.proxyMode) {
+  (globalThis as any).__tgProxyBridge = true;
+  onParentMessage<{ accountId: string; workspaceId: string }>('setAccount', (msg) => {
+    void runExclusive(async () => {
+      try {
+        await callApi('destroy');
+        if (!lastProxyGramJsInit) {
+          throw new Error('proxy_session_not_initialized');
+        }
+        await lastProxyGramJsInit();
+        sendToParent({ type: 'accountChanged', accountId: msg.accountId, ok: true });
+      } catch (err: unknown) {
+        sendToParent({
+          type: 'accountChanged',
+          accountId: msg.accountId,
+          ok: false,
+          error: String(err instanceof Error ? err.message : err),
+        });
+      }
+    });
+  });
+}
 
 addActionHandler('initApi', (global, actions): ActionReturnType => {
   const initialLocationHash = parseInitialLocationHash();
@@ -67,37 +120,41 @@ addActionHandler('initApi', (global, actions): ActionReturnType => {
   // Proxy mode: инжектируем sessionData из сервера вместо loadStoredSession()
   const isProxyMode = Boolean((window as any).__tgConfig?.proxyMode);
 
-  const doInit = async (overrideSessionData?: any, proxyBase?: string, deviceModel?: string, systemVersion?: string) => {
-    await initApi(actions.apiUpdate, {
-      userAgent: navigator.userAgent,
-      platform: PLATFORM_ENV,
-      sessionData: overrideSessionData ?? loadStoredSession(),
-      isWebmSupported: IS_WEBM_SUPPORTED,
-      maxBufferSize: MAX_BUFFER_SIZE,
-      webAuthToken: initialLocationHash?.tgWebAuthToken,
-      dcId: initialLocationHash?.tgWebAuthDcId ? Number(initialLocationHash?.tgWebAuthDcId) : undefined,
-      mockScenario: initialLocationHash?.mockScenario,
-      shouldAllowHttpTransport,
-      shouldForceHttpTransport,
-      shouldDebugExportedSenders,
-      langCode: language,
-      isTestServerRequested: hasTestParam,
-      accountIds,
-      hasPasskeySupport: IS_WEBAUTHN_SUPPORTED,
-      proxyBase,
-      deviceModel,
-      systemVersion,
-    });
+  const buildGramJsInitArgs = (
+    override?: { sessionData?: any; proxyBase?: string; deviceModel?: string; systemVersion?: string },
+  ) => ({
+    userAgent: navigator.userAgent,
+    platform: PLATFORM_ENV,
+    sessionData: override?.sessionData ?? loadStoredSession(),
+    isWebmSupported: IS_WEBM_SUPPORTED,
+    maxBufferSize: MAX_BUFFER_SIZE,
+    webAuthToken: initialLocationHash?.tgWebAuthToken,
+    dcId: initialLocationHash?.tgWebAuthDcId ? Number(initialLocationHash?.tgWebAuthDcId) : undefined,
+    mockScenario: initialLocationHash?.mockScenario,
+    shouldAllowHttpTransport,
+    shouldForceHttpTransport,
+    shouldDebugExportedSenders,
+    langCode: language,
+    isTestServerRequested: hasTestParam,
+    accountIds,
+    hasPasskeySupport: IS_WEBAUTHN_SUPPORTED,
+    proxyBase: override?.proxyBase,
+    deviceModel: override?.deviceModel,
+    systemVersion: override?.systemVersion,
+  });
+
+  const runProxyGramJsInit = async () => {
+    sendToParent({ type: 'tgweb:ready' });
+    const sessionPayload = await requestSessionWithFallback();
+    await initApi(actions.apiUpdate, buildGramJsInitArgs(sessionPayload));
   };
 
+  lastProxyGramJsInit = runProxyGramJsInit;
+
   if (isProxyMode) {
-    sendToParent({ type: 'tgweb:ready' });
-    void fetch('/tg-session', { credentials: 'same-origin' })
-      .then((r) => r.json())
-      .then(({ sessionData, proxyBase, deviceModel, systemVersion }) => doInit(sessionData, proxyBase, deviceModel, systemVersion))
-      .catch(() => doInit()); // fallback без инжекции при ошибке
+    void runExclusive(runProxyGramJsInit);
   } else {
-    void doInit();
+    void initApi(actions.apiUpdate, buildGramJsInitArgs());
   }
 
   void setShouldEnableDebugLog(Boolean(shouldCollectDebugLogs));
