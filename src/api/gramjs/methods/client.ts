@@ -96,7 +96,7 @@ function installProxyBridgeSendApiPatch(proxyBase: string | undefined) {
 
   const mod = apiUpdateEmitter as unknown as { sendApiUpdate: (u: ApiUpdate) => void };
   const origSendApiUpdate = mod.sendApiUpdate.bind(apiUpdateEmitter);
-  mod.sendApiUpdate = (update: ApiUpdate) => {
+  const patched = (update: ApiUpdate) => {
     if (update['@type'] === 'updateAuthorizationState') {
       const st = (update as { authorizationState?: string }).authorizationState;
       if (st === 'authorizationStateReady') {
@@ -113,6 +113,18 @@ function installProxyBridgeSendApiPatch(proxyBase: string | undefined) {
     }
     origSendApiUpdate(update);
   };
+  // ESM named exports — getter-only binding в strict mode (нельзя `mod.sendApiUpdate = ...`).
+  // Этот патч нужен только чтобы шлать `authState` в parent — не критичный для send-flow.
+  // Если переопределить нельзя — оставляем оригинал, postMessage authState просто не будет.
+  try {
+    (mod as any).sendApiUpdate = patched;
+  } catch {
+    try {
+      Object.defineProperty(mod, 'sendApiUpdate', { value: patched, writable: true, configurable: true });
+    } catch {
+      proxyBridgeSendApiPatchInstalled = false; // позволим повторную попытку, не валим worker
+    }
+  }
 }
 
 export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoidFunction) {
