@@ -9,6 +9,10 @@ export type BridgeMessage =
   | { type: 'tgweb:ready' }
   | { type: 'sessionRequest'; requestId: string }
   | { type: 'connectionState'; state: 'connectionStateConnecting' | 'connectionStateReady' | 'connectionStateDisconnected' }
+  // Первичная синхронизация чатов завершена (whenFirstBatchDone → isSynced=true): чаты текущего
+  // аккаунта реально загружены и отрисованы. Host снимает оверлей загрузки именно по нему, а не по
+  // connectionStateReady (MTProto подключился, но чаты ещё не подгружены).
+  | { type: 'syncComplete' }
   | { type: 'authState'; state: 'authorizationStateReady' | 'authorizationStateUnauthorized' | 'authorizationStateClosed' }
   | { type: 'mtprotoSenderLogs'; logs: Array<{ level: 'info' | 'warn' | 'error'; message: string; dcId?: number; ts: number }> }
   | { type: 'accountChanged'; accountId: string; ok: boolean; error?: string };

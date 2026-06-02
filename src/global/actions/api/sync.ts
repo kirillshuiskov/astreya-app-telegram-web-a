@@ -12,6 +12,7 @@ import {
   buildCollectionByKey, omitUndefined, pick, unique,
 } from '../../../util/iteratees';
 import { callApi } from '../../../api/gramjs';
+import { sendToParent } from '../../../util/proxyBridge';
 import { getIsSavedDialog } from '../../helpers';
 import {
   addActionHandler, getActions, getGlobal, setGlobal,
@@ -92,6 +93,12 @@ addActionHandler('sync', (global, actions): ActionReturnType => {
         isFetchingDifference: false,
       };
       setGlobal(global);
+
+      // Proxy mode: сообщаем host'у, что чаты текущего аккаунта загружены и отрисованы —
+      // host по этому сигналу снимает оверлей загрузки (не по раннему connectionStateReady).
+      if ((globalThis as any).__tgProxyBridge) {
+        sendToParent({ type: 'syncComplete' });
+      }
 
       if (DEBUG) {
         // eslint-disable-next-line no-console
