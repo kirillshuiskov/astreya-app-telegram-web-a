@@ -118,7 +118,9 @@ export default function createConfig(_, { mode = 'production' } = {}) {
       chunkFilename: '[id].[chunkhash].js',
       assetModuleFilename: '[name].[contenthash][ext]',
       path: path.resolve(__dirname, 'dist'),
-      clean: true,
+      // WEBPACK_WATCH_NO_CLEAN=1 — режим watch: НЕ чистим dist на каждый ребилд,
+      // иначе clean стирает статику (wasm/emoji/public), скопированную copy_to_dist.sh.
+      clean: !process.env.WEBPACK_WATCH_NO_CLEAN,
     },
 
     module: {
@@ -290,10 +292,16 @@ export default function createConfig(_, { mode = 'production' } = {}) {
 }
 
 function getGitMetadata() {
-  const gitRevisionPlugin = new GitRevisionPlugin();
-  const branch = HEAD || gitRevisionPlugin.branch();
-  const commit = gitRevisionPlugin.commithash()?.substring(0, 7);
-  return { branch, commit };
+  // APP_REVISION — лишь строка для футера. В сборке без .git (напр. multi-stage Docker)
+  // GitRevisionPlugin кидает исключение — гасим его, чтобы не валить весь build.
+  try {
+    const gitRevisionPlugin = new GitRevisionPlugin();
+    const branch = HEAD || gitRevisionPlugin.branch();
+    const commit = gitRevisionPlugin.commithash()?.substring(0, 7);
+    return { branch, commit };
+  } catch {
+    return { branch: HEAD || 'unknown', commit: 'unknown' };
+  }
 }
 
 class WebpackContextExtension {

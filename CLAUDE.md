@@ -2,6 +2,30 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Контекст:** это форк Telegram Web A, встраиваемый в B2B Telegram Sender как iframe-чаты
+> (proxy mode). `src/util/proxyBridge.ts` — мост host↔iframe (сессия, connection/auth state,
+> telemetry, смена аккаунта). Нативный UI чатов планируется на DOM-скрейпинге, форк-view —
+> fallback для голоса/медиа.
+
+## Пересборка и доставка форка (ВАЖНО)
+
+Форк раздаётся browser_worker'ом из собранного `dist/` (`TG_WEB_A_FORK_DIST_PATH`).
+**`dist/` НЕ трекается в git** (`.gitignore`) — его всегда пересобирают из исходников.
+
+- **Локально (dev):**
+  - `npm run build:watch` — инкрементальная пересборка при изменении `src/` (webpack `--watch`,
+    статика копируется один раз; `clean` отключается через `WEBPACK_WATCH_NO_CLEAN`, иначе он
+    стирал бы wasm/emoji на каждый ребилд). browser_worker сразу отдаёт свежий `dist`.
+  - `npm run build:dev` — разовая сборка (webpack + `deploy/copy_to_dist.sh`).
+- **Прод (Docker):** `dist` собирается в multi-stage образе browser_worker
+  (`backend/browser_worker/Dockerfile`, stage `tg-web-a-builder`) → `/opt/tg-web-a/dist`.
+  `docker compose build` пересобирает форк автоматически (контекст сборки — корень монорепо).
+- Сборка устойчива к отсутствию `.git` (multi-stage): `getGitMetadata` в `webpack.config.mjs`
+  обёрнут в try/catch — `APP_REVISION` падает в `unknown`, но build не валится.
+
+**Итого:** изменил `src/` → закоммитил → деплой сам пересоберёт `dist`. Вручную билдить
+перед выкатом не нужно; коммитить `dist/` нельзя.
+
 # Instructions
 
 You are an expert in TypeScript, JavaScript, HTML, SCSS and Teact with deep experience in our project's simplified React-like API. You are working on a modern web app for Telegram.
