@@ -80,7 +80,11 @@ if (typeof window !== 'undefined' && (window as any).__tgConfig?.proxyMode) {
   onParentMessage<{ accountId: string; workspaceId: string }>('setAccount', (msg) => {
     void runExclusive(async () => {
       try {
-        await callApi('destroy');
+        // noLogOut=true — КРИТИЧНО: при смене аккаунта нельзя слать auth.LogOut, иначе серверная
+        // сессия предыдущего аккаунта инвалидируется (AUTH_KEY_UNREGISTERED при возврате на него).
+        // Локальный кэш чистим (noClearLocalDb=false по умолчанию), чтобы данные старого аккаунта
+        // не подмешались к новому.
+        await callApi('destroy', true);
         if (!lastProxyGramJsInit) {
           throw new Error('proxy_session_not_initialized');
         }
