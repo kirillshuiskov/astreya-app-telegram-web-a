@@ -60,6 +60,15 @@ let isRemovingCache = false;
 let cacheUpdateSuspensionTimestamp = 0;
 let unsubscribeFromBeforeUnload: NoneToVoidFunction | undefined;
 
+// Proxy mode (B2B iframe-чаты): IndexedDB/localStorage-кэш global state общий на все аккаунты —
+// ACCOUNT_SLOT не задан, поэтому GLOBAL_STATE_CACHE_KEY один на всех. При холодном буте после смены
+// аккаунта форк сперва гидрировался бы чатами ПРЕДЫДУЩЕГО аккаунта (cross-account flash), и лишь
+// потом досинкивал текущий. В proxy-режиме кэш global state полностью отключаем: каждый аккаунт
+// синкается с нуля (смена аккаунта = remount iframe, см. host ChatFrameWebA).
+function isProxyModeCacheDisabled(): boolean {
+  return typeof window !== 'undefined' && Boolean((window as any).__tgConfig?.proxyMode);
+}
+
 export function cacheGlobal(global: GlobalState) {
   return MAIN_IDB_STORE.set(GLOBAL_STATE_CACHE_KEY, global);
 }
@@ -89,7 +98,7 @@ function cacheIsScreenLocked(global: GlobalState) {
 }
 
 export function initCache() {
-  if (GLOBAL_STATE_CACHE_DISABLED) {
+  if (GLOBAL_STATE_CACHE_DISABLED || isProxyModeCacheDisabled()) {
     return;
   }
 
@@ -119,7 +128,7 @@ export function initCache() {
 }
 
 export async function loadCache(initialState: GlobalState): Promise<GlobalState | undefined> {
-  if (GLOBAL_STATE_CACHE_DISABLED) {
+  if (GLOBAL_STATE_CACHE_DISABLED || isProxyModeCacheDisabled()) {
     return undefined;
   }
 
