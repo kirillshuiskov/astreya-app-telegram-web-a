@@ -10,7 +10,7 @@ import type {
   ApiTypeStory,
 } from '../../api/types';
 import type {
-  ApiFormattedText, ApiMessagePoll, ApiReplyInfo, ApiWebPage, MediaContainer, StatefulMediaContent,
+  ApiFormattedText, ApiMessagePoll, ApiReplyInfo, ApiRichMessage, ApiWebPage, MediaContainer, StatefulMediaContent,
 } from '../../api/types/messages';
 import type { ThreadId } from '../../types';
 import type { LangFn } from '../../util/localization';
@@ -42,6 +42,7 @@ import {
   selectWebPageFromMessage,
 } from '../selectors';
 import { selectThreadIdFromMessage } from '../selectors/threads';
+import { getRichMessagePreviewText } from './richMessage';
 import { getMainUsername } from './users';
 
 const RE_LINK = new RegExp(RE_LINK_TEMPLATE, 'i');
@@ -112,8 +113,69 @@ export function getMessageText(message: MediaContainer) {
   return hasMessageText(message) ? message.content.text : undefined;
 }
 
+function getSharedPrefixLength(firstText: string, secondText: string) {
+  const minLength = Math.min(firstText.length, secondText.length);
+
+  let index = 0;
+  while (index < minLength && firstText[index] === secondText[index]) {
+    index++;
+  }
+
+  return index;
+}
+
+export function pickMatchingTypingDraftMessage<T extends ApiMessage>(
+  incomingMessage: MediaContainer,
+  typingDraftMessages: T[],
+) {
+  const incomingText = getMessageText(incomingMessage)?.text;
+  if (!incomingText) {
+    return undefined;
+  }
+
+  if (typingDraftMessages.length === 1) {
+    return typingDraftMessages[0];
+  }
+
+  let bestMatch: T | undefined;
+  let bestScore = 0;
+
+  typingDraftMessages.forEach((typingDraftMessage) => {
+    const draftText = getMessageText(typingDraftMessage)?.text;
+    if (!draftText) return;
+
+    const score = getSharedPrefixLength(incomingText, draftText);
+    if (!score) return;
+
+    if (!bestMatch) {
+      bestMatch = typingDraftMessage;
+      bestScore = score;
+      return;
+    }
+
+    if (score > bestScore) {
+      bestMatch = typingDraftMessage;
+      bestScore = score;
+    }
+  });
+
+  return bestMatch;
+}
+
 export function getMessageTextWithFallback(lang: LangFn, message: MediaContainer) {
-  return hasMessageText(message) ? message.content.text || { text: lang('MessageUnsupported') } : undefined;
+  if (!hasMessageText(message)) {
+    return undefined;
+  }
+
+  if (message.content.text) {
+    return message.content.text;
+  }
+
+  const richMessageText = message.content.richMessage
+    ? getRichMessagePreviewText(message.content.richMessage)
+    : undefined;
+
+  return { text: richMessageText || lang('MessageUnsupported') };
 }
 
 export function getMessageCustomShape(message: ApiMessage): boolean {
@@ -320,7 +382,11 @@ export function mergeIdRanges(ranges: number[][], idsUpdate: number[]): number[]
 
 export function extractMessageText(message: ApiMessage | ApiStory, inChatList = false) {
   const contentText = message.content.text;
-  if (!contentText) return undefined;
+  if (!contentText) {
+    const richMessageText = message.content.richMessage && getRichMessagePreviewText(message.content.richMessage);
+
+    return richMessageText ? { text: richMessageText } : undefined;
+  }
 
   const { text } = contentText;
   let { entities } = contentText;
@@ -525,11 +591,13 @@ export function createApiMessageFromTypingDraft({
   chatId,
   threadId,
   text,
+  richMessage,
 }: {
   lastMessageId: number;
   chatId: string;
   threadId: ThreadId;
-  text: ApiFormattedText;
+  text?: ApiFormattedText;
+  richMessage?: ApiRichMessage;
 }): ApiMessage {
   const localId = getNextLocalMessageId(lastMessageId);
 
@@ -548,6 +616,7 @@ export function createApiMessageFromTypingDraft({
     date: getServerTime(),
     content: {
       text,
+      richMessage,
     },
     isSilent: true,
     isTypingDraft: true,

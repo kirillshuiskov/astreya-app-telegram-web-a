@@ -19,7 +19,7 @@ import { compact, findLast } from '../../../util/iteratees';
 import { getTranslationFn } from '../../../util/localization';
 import parseHtmlAsFormattedText from '../../../util/parseHtmlAsFormattedText';
 import { getServerTime } from '../../../util/serverTime';
-import versionNotification from '../../../versionNotification.txt';
+import versionNotification from '../../../versionNotification.txt?raw';
 import {
   getMediaFilename,
   getMediaFormat,
@@ -38,6 +38,7 @@ import {
   enterMessageSelectMode,
   exitMessageSelectMode,
   toggleMessageSelection,
+  updateChatMessage,
   updateFocusedMessage,
 } from '../../reducers';
 import { updateTabState } from '../../reducers/tabs';
@@ -97,6 +98,16 @@ addActionHandler('setEditingId', (global, actions, payload): ActionReturnType =>
   const paramName = type === 'scheduled' ? 'editingScheduledId' : 'editingId';
 
   return replaceThreadLocalStateParam(global, chatId, threadId, paramName, messageId);
+});
+
+addActionHandler('markTypingDraftDone', (global, actions, payload): ActionReturnType => {
+  const { chatId, messageId } = payload;
+  const message = selectChatMessage(global, chatId, messageId);
+  if (!message?.isTypingDraft) {
+    return undefined;
+  }
+
+  return updateChatMessage(global, chatId, messageId, { isTypingDraft: undefined });
 });
 
 addActionHandler('setEditingDraft', (global, actions, payload): ActionReturnType => {
@@ -743,25 +754,24 @@ addActionHandler('exitMessageSelectMode', (global, actions, payload): ActionRetu
 });
 
 addActionHandler('openPollModal', (global, actions, payload): ActionReturnType => {
-  const { isQuiz, tabId = getCurrentTabId() } = payload || {};
+  const {
+    chatId,
+    threadId,
+    messageListType,
+    isQuiz,
+    tabId = getCurrentTabId(),
+  } = payload;
 
   return updateTabState(global, {
     pollModal: {
-      isOpen: true,
+      chatId,
+      threadId,
+      messageListType,
       isQuiz,
     },
   }, tabId);
 });
-
-addActionHandler('closePollModal', (global, actions, payload): ActionReturnType => {
-  const { tabId = getCurrentTabId() } = payload || {};
-
-  return updateTabState(global, {
-    pollModal: {
-      isOpen: false,
-    },
-  }, tabId);
-});
+addTabStateResetterAction('closePollModal', 'pollModal');
 
 addActionHandler('openTodoListModal', (global, actions, payload): ActionReturnType => {
   const {
@@ -912,6 +922,16 @@ addActionHandler('closeChatLanguageModal', (global, actions, payload): ActionRet
     chatLanguageModal: undefined,
   }, tabId);
 });
+
+addActionHandler('openInstantView', (global, actions, payload): ActionReturnType => {
+  const { webPageId, tabId = getCurrentTabId() } = payload;
+
+  return updateTabState(global, {
+    instantViewModal: { webPageId },
+  }, tabId);
+});
+
+addTabStateResetterAction('closeInstantView', 'instantViewModal');
 
 addActionHandler('copySelectedMessages', (global, actions, payload): ActionReturnType => {
   const { tabId = getCurrentTabId() } = payload || {};
@@ -1085,7 +1105,7 @@ function copyTextForMessages(global: GlobalState, chatId: string, messageIds: nu
 
 addActionHandler('openDeleteMessageModal', (global, actions, payload): ActionReturnType => {
   const {
-    chatId, messageIds, isSchedule,
+    chatId, messageIds, isSchedule, reactionContext,
     tabId = getCurrentTabId(),
   } = payload;
 
@@ -1095,6 +1115,7 @@ addActionHandler('openDeleteMessageModal', (global, actions, payload): ActionRet
       chatId,
       messageIds,
       isSchedule,
+      reactionContext,
     },
   }, tabId);
   setGlobal(global);

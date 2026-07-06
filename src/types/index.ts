@@ -23,6 +23,8 @@ import type {
   ApiMessageEntity,
   ApiNewMediaTodo,
   ApiNewPoll,
+  ApiPageBlockPhoto,
+  ApiPageBlockVideo,
   ApiPeer,
   ApiPhoto,
   ApiReaction,
@@ -139,6 +141,7 @@ export interface AccountSettings {
   hasWebNotifications: boolean;
   hasPushNotifications: boolean;
   hasContactJoinedNotifications?: boolean;
+  shouldNotifyAboutPinnedMessages: boolean;
   notificationSoundVolume: number;
   canAutoLoadPhotoFromContacts: boolean;
   canAutoLoadPhotoInPrivateChats: boolean;
@@ -327,6 +330,16 @@ export enum RightColumnContent {
 }
 
 export type MediaViewerMedia = ApiPhoto | ApiVideo | ApiDocument;
+export type MediaViewerPageBlock = ApiPageBlockPhoto | ApiPageBlockVideo;
+export type MediaViewerPageMedia = {
+  blocks: MediaViewerPageBlock[];
+  sourceIds: string[];
+  pageUrl?: string;
+  chatId?: string;
+  messageId?: number;
+  threadId?: ThreadId;
+  isProtected?: boolean;
+};
 
 export enum MediaViewerOrigin {
   Inline,
@@ -344,6 +357,8 @@ export enum MediaViewerOrigin {
   PreviewMedia,
   SponsoredMessage,
   PollPreview,
+  RichPageBlock,
+  IVPageBlock,
 }
 
 export enum StoryViewerOrigin {
@@ -384,6 +399,7 @@ export enum ManagementProgress {
 export interface ManagementState {
   isActive: boolean;
   nextScreen?: ManagementScreens;
+  selectedChatMemberId?: string;
   checkedUsername?: string;
   isUsernameAvailable?: boolean;
   error?: string;
@@ -652,7 +668,7 @@ export interface ThreadLocalState {
 
   noWebPage?: boolean;
 
-  typingStatus?: ApiTypingStatus;
+  typingStatusByPeerId?: Record<string, ApiTypingStatus>;
 
   typingDraftIdByRandomId?: Record<string, number>;
 }
@@ -673,6 +689,7 @@ export interface ServiceNotification {
 
 export interface TopicsInfo {
   totalCount: number;
+  isCache?: true;
   topicsById: Record<ThreadId, ApiTopic>;
   listedTopicIds?: number[];
   orderedPinnedTopicIds?: number[];

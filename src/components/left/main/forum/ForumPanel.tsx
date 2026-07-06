@@ -19,6 +19,7 @@ import {
   selectChat,
   selectCurrentMessageList,
   selectIsForumPanelOpen,
+  selectIsSynced,
   selectTabState,
   selectTopicsInfo,
 } from '../../../../global/selectors';
@@ -29,9 +30,11 @@ import captureEscKeyListener from '../../../../util/captureEscKeyListener';
 import { captureEvents, SwipeDirection } from '../../../../util/captureEvents';
 import { waitForTransitionEnd } from '../../../../util/cssAnimationEndListeners';
 import { isUserId } from '../../../../util/entities/ids';
-import { mapTruthyValues, mapValues } from '../../../../util/iteratees';
+import {
+  buildCollectionByCallback, compact, mapTruthyValues,
+} from '../../../../util/iteratees';
 
-import useSelector from '../../../../hooks/data/useSelector';
+import { useShallowSelector } from '../../../../hooks/data/useSelector';
 import useAppLayout from '../../../../hooks/useAppLayout';
 import useHistoryBack from '../../../../hooks/useHistoryBack';
 import useInfiniteScroll from '../../../../hooks/useInfiniteScroll';
@@ -66,6 +69,7 @@ type StateProps = {
   chat?: ApiChat;
   topicsInfo?: TopicsInfo;
   currentTopicId?: number;
+  isSynced?: boolean;
   withInterfaceAnimations?: boolean;
 };
 
@@ -76,6 +80,7 @@ const ForumPanel = ({
   currentTopicId,
   isOpen,
   isHidden,
+  isSynced,
   topicsInfo,
   withInterfaceAnimations,
   onTopicSearch,
@@ -92,12 +97,14 @@ const ForumPanel = ({
   const scrollTopHandlerRef = useRef<HTMLDivElement>();
   const { isMobile } = useAppLayout();
   const chatId = chat?.id;
+  const listedTopicIds = topicsInfo?.listedTopicIds;
+  const areListedTopicsLoaded = Boolean(listedTopicIds);
 
   useEffect(() => {
-    if (chatId && !topicsInfo) {
-      loadTopics({ chatId });
-    }
-  }, [topicsInfo, chatId]);
+    if (!chatId || !isSynced) return;
+    if (areListedTopicsLoaded && !topicsInfo?.isCache) return;
+    loadTopics({ chatId });
+  }, [areListedTopicsLoaded, chatId, isSynced, topicsInfo?.isCache]);
 
   const [isScrolled, setIsScrolled] = useState(false);
   const lang = useLang();
@@ -127,32 +134,43 @@ const ForumPanel = ({
   });
 
   const topicsThreadSelector = useCallback((global: GlobalState) => {
-    if (!chat?.id) return undefined;
-    return mapTruthyValues(topicsInfo?.topicsById || {}, (t) => selectThread(global, chat.id, t.id));
-  }, [chat?.id, topicsInfo?.topicsById]);
-  const topicsThreads = useSelector(topicsThreadSelector);
+    if (!chat?.id || !listedTopicIds) return undefined;
+    return buildCollectionByCallback(listedTopicIds, (topicId) => (
+      [topicId, selectThread(global, chat.id, topicId)]
+    ));
+  }, [chat?.id, listedTopicIds]);
+  const topicsThreads = useShallowSelector(topicsThreadSelector);
+
+  const listedTopics = useMemo(() => {
+    if (!listedTopicIds || !topicsInfo) return undefined;
+    return compact(listedTopicIds.map((id) => topicsInfo.topicsById[id]));
+  }, [listedTopicIds, topicsInfo]);
 
   const orderedIds = useMemo(() => {
-    const topicsThreadInfos = topicsThreads && mapValues(topicsThreads, (t) => t.threadInfo);
-    const ids = topicsInfo && topicsThreads
+    const topicsThreadInfos = topicsThreads && mapTruthyValues(topicsThreads, (t) => t?.threadInfo);
+    const ids = listedTopics && topicsThreadInfos
       ? getOrderedTopics(
-        Object.values(topicsInfo.topicsById),
+        listedTopics,
         topicsThreadInfos,
-        topicsInfo.orderedPinnedTopicIds,
+        topicsInfo?.orderedPinnedTopicIds,
       ).map(({ id }) => id)
       : [];
 
     if (!chat?.isBotForum) return ids;
 
     return [MAIN_THREAD_ID, ...ids];
-  }, [chat?.isBotForum, topicsInfo, topicsThreads]);
+  }, [chat?.isBotForum, listedTopics, topicsInfo?.orderedPinnedTopicIds, topicsThreads]);
 
   const { orderDiffById, shiftDiff, getAnimationType, onReorderAnimationEnd } = useOrderDiff(orderedIds, 0, chat?.id);
+  const loadedListedTopicCount = listedTopicIds?.length ?? 0;
+  const isInfiniteScrollDisabled = !topicsInfo?.totalCount
+    || !areListedTopicsLoaded
+    || loadedListedTopicCount >= topicsInfo.totalCount;
 
   const [viewportIds, getMore] = useInfiniteScroll(() => {
-    if (!chat) return;
+    if (!chat || !isSynced) return;
     loadTopics({ chatId: chat.id });
-  }, orderedIds, !topicsInfo?.totalCount || orderedIds.length >= topicsInfo.totalCount, TOPICS_SLICE);
+  }, orderedIds, isInfiniteScrollDisabled, TOPICS_SLICE);
 
   const shouldRenderRef = useRef(false);
   const isVisible = isOpen && !isHidden;
@@ -242,7 +260,7 @@ const ForumPanel = ({
     });
   }
 
-  const isLoading = topicsInfo === undefined;
+  const isLoading = !areListedTopicsLoaded;
 
   if (!chat) return undefined;
 
@@ -336,6 +354,7 @@ export default memo(withGlobal<OwnProps>(
     return {
       chat,
       currentTopicId: chatId === currentChatId ? Number(currentThreadId) : undefined,
+      isSynced: selectIsSynced(global),
       withInterfaceAnimations: selectCanAnimateInterface(global),
       topicsInfo,
     };

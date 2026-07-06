@@ -1,5 +1,6 @@
 import {
   Api as GramJs,
+  errors,
   sessions,
   type Update,
 } from '../../../lib/gramjs';
@@ -18,7 +19,7 @@ import type {
 
 import {
   APP_CODE_NAME,
-  DEBUG, DEBUG_GRAMJS, IS_TEST, LANG_PACK, UPLOAD_WORKERS,
+  DEBUG, DEBUG_GRAMJS, IS_TEST, LANG_PACK, TELEGRAM_API_HASH, TELEGRAM_API_ID, UPLOAD_WORKERS,
 } from '../../../config';
 import { pause } from '../../../util/schedulers';
 import { buildWebPage } from '../apiBuilders/messageContent';
@@ -40,6 +41,7 @@ import {
   addWebPageMediaToLocalDb,
 } from '../helpers/localDb';
 import {
+  buildApiError,
   isResponseUpdate, log,
 } from '../helpers/misc';
 import localDb, { clearLocalDb, type RepairInfo } from '../localDb';
@@ -49,8 +51,9 @@ import {
   getDifference,
   init as initUpdatesManager,
   processUpdate,
+  requestChannelDifference as requestChannelDifferenceFromUpdates,
   reset as resetUpdatesManager,
-  scheduleGetChannelDifference,
+  setOpenedChannelIds as setOpenedChannelIdsInUpdates,
   updateChannelState,
 } from '../updates/updateManager';
 import {
@@ -155,8 +158,8 @@ export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoid
 
   client = new TelegramClient(
     session,
-    Number(process.env.TELEGRAM_API_ID),
-    process.env.TELEGRAM_API_HASH,
+    TELEGRAM_API_ID,
+    TELEGRAM_API_HASH,
     {
       // В proxy mode используем GoLogin UA для совпадения fingerprint с GoLogin профилем
       deviceModel: injectedDeviceModel || navigator.userAgent || userAgent || DEFAULT_USER_AGENT,
@@ -516,9 +519,9 @@ export async function fetchCurrentUser() {
 }
 
 export function dispatchErrorUpdate<T extends GramJs.AnyRequest>(err: Error, request: T) {
-  const message = err instanceof RPCError ? err.errorMessage : err.message;
+  const { message, code } = buildApiError(err);
 
-  const isSlowMode = message === 'FLOOD' && (
+  const isSlowMode = err instanceof errors.FloodError && (
     request instanceof GramJs.messages.SendMessage
     || request instanceof GramJs.messages.SendMedia
     || request instanceof GramJs.messages.SendMultiMedia
@@ -528,6 +531,7 @@ export function dispatchErrorUpdate<T extends GramJs.AnyRequest>(err: Error, req
     '@type': 'error',
     error: {
       message,
+      code,
       isSlowMode,
       hasErrorKey: true,
     },
@@ -722,5 +726,9 @@ export function setShouldDebugExportedSenders(value: boolean) {
 }
 
 export function requestChannelDifference(channelId: string) {
-  scheduleGetChannelDifference(channelId);
+  requestChannelDifferenceFromUpdates(channelId);
+}
+
+export function setOpenedChannelIds(channelIds: string[]) {
+  setOpenedChannelIdsInUpdates(channelIds);
 }

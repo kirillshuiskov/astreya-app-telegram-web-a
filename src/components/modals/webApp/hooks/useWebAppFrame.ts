@@ -4,9 +4,9 @@ import { getActions, getGlobal } from '../../../../global';
 
 import type { WebApp, WebAppInboundEvent, WebAppOutboundEvent } from '../../../../types/webapp';
 
-import { VERIFY_AGE_MIN_DEFAULT } from '../../../../config';
 import { getWebAppKey } from '../../../../global/helpers';
 import { isMessageFromIframe } from '../../../../util/browser/iframe';
+import { isValidProtocol } from '../../../../util/browser/url';
 import { extractCurrentThemeParams } from '../../../../util/themeStyle';
 import { REM } from '../../../common/helpers/mediaDimensions';
 
@@ -52,11 +52,11 @@ const useWebAppFrame = (
     closeWebApp,
     openSuggestedStatusModal,
     updateWebApp,
-    updateContentSettings,
+    openUrl,
   } = getActions();
 
   const isReloadSupportedRef = useRef<boolean>(false);
-  const reloadTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const reloadTimeoutRef = useRef<number>();
   const ignoreEventsRef = useRef<boolean>(false);
   const lastFrameSizeRef = useRef<{ width: number; height: number; isResizing?: boolean }>();
   const windowSize = useWindowSize();
@@ -241,8 +241,11 @@ const useWebAppFrame = (
       }
 
       if (eventType === 'web_app_open_link') {
-        const linkUrl = eventData.url;
-        window.open(linkUrl, '_blank', 'noreferrer');
+        if (!isValidProtocol(eventData.url, getGlobal().appConfig.webAppAllowedProtocols)) {
+          return;
+        }
+
+        openUrl({ url: eventData.url, tryInstant: eventData.try_instant_view, shouldSkipModal: true });
       }
 
       if (eventType === 'web_app_biometry_get_info') {
@@ -369,27 +372,6 @@ const useWebAppFrame = (
           duration: Number(duration),
           botId: webApp.botId,
         });
-      }
-
-      if (eventType === 'web_app_verify_age') {
-        const { passed } = eventData;
-        const minAge = getGlobal().appConfig.verifyAgeMin || VERIFY_AGE_MIN_DEFAULT;
-        const ageFromParam = eventData.age || 0;
-
-        if (passed && ageFromParam >= minAge) {
-          showNotification({
-            message: {
-              key: 'TitleAgeCheckSuccess',
-            },
-          });
-          updateContentSettings({ isSensitiveEnabled: true });
-        } else {
-          showNotification({
-            message: {
-              key: 'TitleAgeCheckFailed',
-            },
-          });
-        }
       }
 
       onEvent(data);

@@ -31,7 +31,6 @@ import { IS_MAC_OS } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
 import { isUserId } from '../../util/entities/ids';
 
-import { useVtn } from '../../hooks/animations/useVtn';
 import useAppLayout from '../../hooks/useAppLayout';
 import useCurrentOrPrev from '../../hooks/useCurrentOrPrev';
 import useFlag from '../../hooks/useFlag';
@@ -67,6 +66,7 @@ type OwnProps = {
   isCreatingTopic?: boolean;
   isEditingTopic?: boolean;
   isAddingChatMembers?: boolean;
+  headerBackground?: 'regular' | 'secondary';
   profileState?: ProfileState;
   managementScreen?: ManagementScreens;
   onClose: (shouldScrollUp?: boolean) => void;
@@ -158,6 +158,7 @@ const RightHeader: FC<OwnProps & StateProps> = ({
   isCreatingTopic,
   isEditingTopic,
   isAddingChatMembers,
+  headerBackground,
   profileState,
   managementScreen,
   canAddContact,
@@ -198,7 +199,6 @@ const RightHeader: FC<OwnProps & StateProps> = ({
 
   const [isDeleteDialogOpen, openDeleteDialog, closeDeleteDialog] = useFlag();
   const { isMobile } = useAppLayout();
-  const { createVtnStyle } = useVtn();
 
   const {
     sortType: giftsSortType,
@@ -266,6 +266,8 @@ const RightHeader: FC<OwnProps & StateProps> = ({
 
   const oldLang = useOldLang();
   const lang = useLang();
+
+  const isSecondaryBackground = headerBackground === 'secondary';
   const contentKey = isProfile ? (
     profileState === ProfileState.Profile ? (
       HeaderContent.Profile
@@ -388,6 +390,26 @@ const RightHeader: FC<OwnProps & StateProps> = ({
       />
     );
   }, [isMobile, lang]);
+
+  const primaryEditButton = canEditTopic ? (
+    <Button
+      round
+      color="translucent"
+      size="smaller"
+      ariaLabel={oldLang('EditTopic')}
+      onClick={toggleEditTopic}
+      iconName="edit"
+    />
+  ) : (canManage || canEditBot) ? (
+    <Button
+      round
+      color="translucent"
+      size="smaller"
+      ariaLabel={oldLang('Edit')}
+      onClick={handleToggleManagement}
+      iconName="edit"
+    />
+  ) : undefined;
 
   function renderHeaderContent() {
     if (renderingContentKey === -1) {
@@ -635,36 +657,7 @@ const RightHeader: FC<OwnProps & StateProps> = ({
                   iconName="add-user"
                 />
               )}
-              {canManage && !isInsideTopic && (
-                <Button
-                  round
-                  color="translucent"
-                  size="smaller"
-                  ariaLabel={oldLang('Edit')}
-                  onClick={handleToggleManagement}
-                  iconName="edit"
-                />
-              )}
-              {canEditBot && (
-                <Button
-                  round
-                  color="translucent"
-                  size="smaller"
-                  ariaLabel={oldLang('Edit')}
-                  onClick={handleToggleManagement}
-                  iconName="edit"
-                />
-              )}
-              {canEditTopic && (
-                <Button
-                  round
-                  color="translucent"
-                  size="smaller"
-                  ariaLabel={oldLang('EditTopic')}
-                  onClick={toggleEditTopic}
-                  iconName="edit"
-                />
-              )}
+              {primaryEditButton}
               {canViewStatistics && (
                 <Button
                   round
@@ -712,9 +705,8 @@ const RightHeader: FC<OwnProps & StateProps> = ({
 
   return (
     <div
-      className="RightHeader"
+      className={buildClassName('RightHeader', isSecondaryBackground && 'secondary')}
       data-tauri-drag-region={IS_TAURI && IS_MAC_OS ? true : undefined}
-      style={createVtnStyle('rightHeader', true)}
     >
       <Button
         className="close-button"

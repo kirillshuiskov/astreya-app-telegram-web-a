@@ -1,12 +1,13 @@
 import type { Api } from '../../../lib/gramjs';
 import type { TypedBroadcastChannel } from '../../../util/browser/multitab';
-import type { ApiInitialArgs, ApiOnProgress, OnApiUpdate } from '../../types';
+import type { ApiError, ApiInitialArgs, ApiOnProgress, OnApiUpdate } from '../../types';
 import type { LocalDb } from '../localDb';
 import type { MethodArgs, MethodResponse, Methods } from '../methods/types';
 import type { OriginPayload, ThenArg, WorkerMessageEvent } from './types';
 
 import { DEBUG, IGNORE_UNHANDLED_ERRORS } from '../../../config';
 import { IS_TAURI } from '../../../util/browser/globalEnvironment';
+import { IS_SAFARI } from '../../../util/browser/windowEnvironment';
 import { logDebugMessage } from '../../../util/debugConsole';
 import Deferred from '../../../util/Deferred';
 import { getCurrentTabId, subscribeToMasterChange } from '../../../util/establishMultitabRole';
@@ -100,10 +101,11 @@ export function initApi(onUpdate: OnApiUpdate, initialArgs: ApiInitialArgs) {
 
     worker = new Worker(new URL('./worker.ts', import.meta.url), {
       name: params.toString(),
+      type: 'module',
     });
     subscribeToWorker(onUpdate);
 
-    if (initialArgs.platform === 'iOS' || (initialArgs.platform === 'macOS' && IS_TAURI)) {
+    if (IS_SAFARI || (initialArgs.platform === 'macOS' && IS_TAURI)) {
       setupHealthCheck();
     }
   }
@@ -316,7 +318,7 @@ function subscribeToWorker(onUpdate: OnApiUpdate) {
 export function handleMethodResponse(data: {
   messageId: string;
   response?: ThenArg<MethodResponse<keyof Methods>>;
-  error?: { message: string };
+  error?: Pick<ApiError, 'message' | 'code' | 'hasErrorKey'>;
 }) {
   const requestState = requestStates.get(data.messageId);
   if (requestState) {

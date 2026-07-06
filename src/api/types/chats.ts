@@ -23,6 +23,14 @@ type ApiChatType = (
 
 export type ApiPeer = ApiChat | ApiUser;
 
+export type ApiChatInviteJoinWebView = {
+  type: 'webView';
+  botId: string;
+  url: string;
+  queryId?: string;
+  isFullscreen: boolean;
+};
+
 export interface ApiChat {
   id: string;
   folderId?: number;
@@ -100,12 +108,22 @@ export interface ApiChat {
   paidMessagesStars?: number;
 }
 
-export interface ApiTypingStatus {
-  userId?: string;
-  action: string;
+type ApiTypingStatusBase = {
   timestamp: number;
-  emoji?: string;
-}
+};
+
+type ApiTypingStatusSimple = ApiTypingStatusBase & {
+  type: 'typing' | 'recordVideo' | 'uploadVideo' | 'recordAudio' | 'uploadAudio'
+    | 'uploadPhoto' | 'uploadFile' | 'playingGame' | 'recordRound' | 'uploadRound'
+    | 'chooseSticker' | 'chooseLocation' | 'chooseContact';
+};
+
+type ApiTypingStatusWatchingAnimations = ApiTypingStatusBase & {
+  type: 'watchingAnimations';
+  emoji: string;
+};
+
+export type ApiTypingStatus = ApiTypingStatusSimple | ApiTypingStatusWatchingAnimations;
 
 export interface ApiChatFullInfo {
   about?: string;
@@ -156,6 +174,7 @@ export interface ApiChatFullInfo {
   boostsToUnrestrict?: number;
   botVerification?: ApiBotVerification;
   mainTab?: ApiProfileTab;
+  guardBotId?: string;
 }
 
 export interface ApiChatMember {
@@ -182,6 +201,7 @@ export interface ApiChatAdminRights {
   pinMessages?: true;
   addAdmins?: true;
   anonymous?: true;
+  other?: true;
   manageCall?: true;
   manageTopics?: true;
   postStories?: true;
@@ -213,6 +233,7 @@ export interface ApiChatBannedRights {
   sendDocs?: true;
   sendPlain?: true;
   editRank?: true;
+  sendReactions?: true;
   untilDate?: number;
 }
 

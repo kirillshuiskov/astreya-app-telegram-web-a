@@ -1,8 +1,8 @@
 import type { ActionReturnType } from '../../types';
-import { PaymentStep } from '../../../types';
 
 import { SERVICE_NOTIFICATIONS_USER_ID } from '../../../config';
 import { applyLangPackDifference, getTranslationFn, requestLangPackDifference } from '../../../util/localization';
+import { isChatChannel } from '../../helpers';
 import { getPeerTitle } from '../../helpers/peers';
 import { addActionHandler, setGlobal } from '../../index';
 import {
@@ -13,8 +13,6 @@ import {
   removeBlockedUser,
   removePeerStory,
   replaceWebPage,
-  setConfirmPaymentUrl,
-  setPaymentStep,
   updateFullWebPage,
   updateLastReadStoryForPeer,
   updatePeerStory,
@@ -25,6 +23,7 @@ import {
 import { updateTabState } from '../../reducers/tabs';
 import { updateThreadInfo } from '../../reducers/threads';
 import {
+  selectChat,
   selectPeer,
   selectPeerStories,
   selectPeerStory,
@@ -83,6 +82,10 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
 
     case 'updateConfig':
       actions.loadConfig();
+      break;
+
+    case 'updateAiComposeTones':
+      actions.loadAiComposeTones();
       break;
 
     case 'updateNewAuthorization': {
@@ -149,14 +152,6 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
       setGlobal(global);
       break;
 
-    case 'updatePaymentVerificationNeeded':
-      Object.values(global.byTabId).forEach(({ id: tabId }) => {
-        global = setConfirmPaymentUrl(global, update.url, tabId);
-        global = setPaymentStep(global, PaymentStep.ConfirmPayment, tabId);
-      });
-      setGlobal(global);
-      break;
-
     case 'updateWebViewResultSent':
       Object.values(global.byTabId).forEach((tabState) => {
         Object.entries(tabState.webApps.openedWebApps).forEach(([webAppKey, webApp]) => {
@@ -167,6 +162,50 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
         });
       });
       break;
+
+    case 'updateJoinChatWebViewDecision': {
+      const { peerId, queryId, result } = update;
+      const chat = selectChat(global, peerId);
+
+      Object.values(global.byTabId).forEach((tabState) => {
+        const tabId = tabState.id;
+        Object.entries(tabState.webApps.openedWebApps).forEach(([webAppKey, webApp]) => {
+          if (webApp.queryId !== queryId) return;
+
+          const isChannel = webApp.isJoinChatBroadcast ?? Boolean(chat && isChatChannel(chat));
+
+          if (result.type === 'webView') {
+            const { botId, peerId: webAppPeerId, isJoinChatBroadcast } = webApp;
+            actions.closeWebApp({ key: webAppKey, skipClosingConfirmation: true, tabId });
+            actions.openChatInviteWebView({
+              botId, url: result.url, queryId, peerId: webAppPeerId, isBroadcast: isJoinChatBroadcast, tabId,
+            });
+            return;
+          }
+
+          actions.closeWebApp({ key: webAppKey, skipClosingConfirmation: true, tabId });
+
+          if (result.type === 'approved') {
+            actions.openChat({ id: peerId, tabId });
+            actions.showNotification({
+              message: { key: isChannel ? 'ActionChannelJoinedByRequestChannelYou' : 'ActionJoinedByRequestYou' },
+              tabId,
+            });
+          } else if (result.type === 'declined') {
+            actions.showNotification({
+              message: { key: isChannel ? 'RequestToJoinChannelDeclined' : 'RequestToJoinGroupDeclined' },
+              tabId,
+            });
+          } else if (result.type === 'queued') {
+            actions.showNotification({
+              message: { key: isChannel ? 'RequestToJoinChannelSentDescription' : 'RequestToJoinGroupSentDescription' },
+              tabId,
+            });
+          }
+        });
+      });
+      break;
+    }
 
     case 'updateWebPage': {
       const { webPage } = update;
