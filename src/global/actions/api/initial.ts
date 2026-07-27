@@ -47,7 +47,7 @@ import {
   clearGlobalForLockScreen, updateManagementProgress, updatePasscodeSettings,
 } from '../../reducers';
 import { updateAuth } from '../../reducers/auth';
-import { selectChat } from '../../selectors';
+import { selectChat, selectCurrentChat } from '../../selectors';
 import { selectSharedSettings } from '../../selectors/sharedState';
 import { destroySharedStatePort } from '../../shared/sharedStateConnector';
 
@@ -105,28 +105,45 @@ if (typeof window !== 'undefined' && (window as any).__tgConfig?.proxyMode) {
   });
 
   onParentMessage<{ peerId: string; username?: string }>('openPeer', (msg) => {
-    const actions = getActions();
-    try {
-      // Username резолвится на сервере — работает и для диалога, которого нет
-      // в загруженном списке чатов. Для пиров без username остаётся openChat по id.
-      if (msg.username) {
-        actions.openChatByUsername({ username: msg.username });
+    void (async () => {
+      const actions = getActions();
+      try {
+        // Username резолвится на сервере — работает и для диалога, которого нет
+        // в загруженном списке чатов. Для пиров без username остаётся openChat по id.
+        if (msg.username) {
+          // openChatByUsername — асинхронный action-хендлер (chats.ts): диспетчер
+          // (handleAction в teactn.tsx) возвращает реальный Promise, который резолвится
+          // только после фактического fetchChatByUsername. Дожидаемся его, иначе
+          // сообщим хосту ok:true раньше, чем чат реально открылся (или не открылся).
+          await actions.openChatByUsername({ username: msg.username });
+          // openChatByUsername не бросает исключение на "user does not exist" — молча
+          // делает openPreviousChat + showNotification (chats.ts). Единственный честный
+          // способ узнать исход — проверить, что открытым чатом реально стал запрошенный.
+          const openedChat = selectCurrentChat(getGlobal());
+          const isResolved = Boolean(openedChat?.usernames?.some((u) => u.username === msg.username));
+          if (!isResolved) {
+            sendToParent({
+              type: 'openPeerResult', peerId: msg.peerId, ok: false, reason: 'not_found',
+            });
+            return;
+          }
+          sendToParent({ type: 'openPeerResult', peerId: msg.peerId, ok: true });
+          return;
+        }
+        if (!selectChat(getGlobal(), msg.peerId)) {
+          sendToParent({
+            type: 'openPeerResult', peerId: msg.peerId, ok: false, reason: 'chat_not_loaded',
+          });
+          return;
+        }
+        actions.openChat({ id: msg.peerId });
         sendToParent({ type: 'openPeerResult', peerId: msg.peerId, ok: true });
-        return;
-      }
-      if (!selectChat(getGlobal(), msg.peerId)) {
+      } catch (err: unknown) {
         sendToParent({
-          type: 'openPeerResult', peerId: msg.peerId, ok: false, reason: 'chat_not_loaded',
+          type: 'openPeerResult', peerId: msg.peerId, ok: false, reason: 'error',
         });
-        return;
       }
-      actions.openChat({ id: msg.peerId });
-      sendToParent({ type: 'openPeerResult', peerId: msg.peerId, ok: true });
-    } catch (err: unknown) {
-      sendToParent({
-        type: 'openPeerResult', peerId: msg.peerId, ok: false, reason: 'error',
-      });
-    }
+    })();
   });
 }
 
