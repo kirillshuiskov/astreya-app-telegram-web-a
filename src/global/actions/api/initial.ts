@@ -41,12 +41,13 @@ import {
   removeGlobalFromCache, removeSharedStateFromCache, serializeGlobal, serializeShared,
 } from '../../cache';
 import {
-  addActionHandler, getGlobal, setGlobal,
+  addActionHandler, getActions, getGlobal, setGlobal,
 } from '../../index';
 import {
   clearGlobalForLockScreen, updateManagementProgress, updatePasscodeSettings,
 } from '../../reducers';
 import { updateAuth } from '../../reducers/auth';
+import { selectChat } from '../../selectors';
 import { selectSharedSettings } from '../../selectors/sharedState';
 import { destroySharedStatePort } from '../../shared/sharedStateConnector';
 
@@ -102,7 +103,44 @@ if (typeof window !== 'undefined' && (window as any).__tgConfig?.proxyMode) {
       }
     });
   });
+
+  onParentMessage<{ peerId: string; username?: string }>('openPeer', (msg) => {
+    const actions = getActions();
+    try {
+      // Username резолвится на сервере — работает и для диалога, которого нет
+      // в загруженном списке чатов. Для пиров без username остаётся openChat по id.
+      if (msg.username) {
+        actions.openChatByUsername({ username: msg.username });
+        sendToParent({ type: 'openPeerResult', peerId: msg.peerId, ok: true });
+        return;
+      }
+      if (!selectChat(getGlobal(), msg.peerId)) {
+        sendToParent({
+          type: 'openPeerResult', peerId: msg.peerId, ok: false, reason: 'chat_not_loaded',
+        });
+        return;
+      }
+      actions.openChat({ id: msg.peerId });
+      sendToParent({ type: 'openPeerResult', peerId: msg.peerId, ok: true });
+    } catch (err: unknown) {
+      sendToParent({
+        type: 'openPeerResult', peerId: msg.peerId, ok: false, reason: 'error',
+      });
+    }
+  });
 }
+
+// Сообщаем хосту о смене открытого чата. Обработчиков у processOpenChatOrThread
+// уже несколько (ui/chats.ts, ui/misc.ts, ui/reactions.ts) — добавляем свой,
+// ничего не перехватывая и не меняя UI. Через это действие проходит ЛЮБОЕ
+// открытие чата, включая клик по нативному списку: именно этот случай хост
+// иначе не видит, и кружок в рейле продолжает гореть.
+addActionHandler('processOpenChatOrThread', (global, actions, payload): ActionReturnType => {
+  if (!(globalThis as any).__tgProxyBridge) return;
+  const { chatId } = payload;
+  if (!chatId) return;
+  sendToParent({ type: 'peerChanged', peerId: String(chatId) });
+});
 
 addActionHandler('initApi', (global, actions): ActionReturnType => {
   const initialLocationHash = parseInitialLocationHash();

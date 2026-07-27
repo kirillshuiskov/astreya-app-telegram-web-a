@@ -15,12 +15,25 @@ export type BridgeMessage =
   | { type: 'syncComplete' }
   | { type: 'authState'; state: 'authorizationStateReady' | 'authorizationStateUnauthorized' | 'authorizationStateClosed' }
   | { type: 'mtprotoSenderLogs'; logs: Array<{ level: 'info' | 'warn' | 'error'; message: string; dcId?: number; ts: number }> }
-  | { type: 'accountChanged'; accountId: string; ok: boolean; error?: string };
+  | { type: 'accountChanged'; accountId: string; ok: boolean; error?: string }
+  // Результат host-команды openPeer. ok=false + reason='chat_not_loaded' —
+  // диалога нет в загруженном списке форка (очень старый диалог за пределами
+  // первой страницы getDialogs); host покажет пользователю понятную ошибку
+  // вместо молчаливого «клик ничего не сделал».
+  | { type: 'openPeerResult'; peerId: string; ok: boolean; reason?: string }
+  // В форке открыли другой чат. Шлётся на ЛЮБОЕ открытие, включая клик по
+  // нативному списку чатов, — по нему хост гасит кружок в рейле, иначе рейл
+  // врёт всякий раз, когда оператор навигируется мимо него.
+  | { type: 'peerChanged'; peerId: string };
 
 /** Сообщения host → iframe */
 export type BridgeIncomingMessage =
   | (SessionPayload & { type: 'sessionResponse' })
-  | { type: 'setAccount'; accountId: string; workspaceId: string };
+  | { type: 'setAccount'; accountId: string; workspaceId: string }
+  // Открыть диалог с пиром. username, если есть, предпочтительнее: он
+  // резолвится на сервере и работает даже для диалога, не попавшего в
+  // загруженный список чатов.
+  | { type: 'openPeer'; peerId: string; username?: string };
 
 export type SessionPayload = {
   requestId: string;
