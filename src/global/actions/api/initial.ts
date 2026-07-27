@@ -47,7 +47,7 @@ import {
   clearGlobalForLockScreen, updateManagementProgress, updatePasscodeSettings,
 } from '../../reducers';
 import { updateAuth } from '../../reducers/auth';
-import { selectChat, selectCurrentChat } from '../../selectors';
+import { selectChat, selectCurrentChat, selectUser } from '../../selectors';
 import { selectSharedSettings } from '../../selectors/sharedState';
 import { destroySharedStatePort } from '../../shared/sharedStateConnector';
 
@@ -130,7 +130,14 @@ if (typeof window !== 'undefined' && (window as any).__tgConfig?.proxyMode) {
           sendToParent({ type: 'openPeerResult', peerId: msg.peerId, ok: true });
           return;
         }
-        if (!selectChat(getGlobal(), msg.peerId)) {
+        // Гейт намеренно шире, чем «диалог загружен»: родной openChat умеет
+        // восстанавливаться сам — при отсутствии чата он берёт selectUser(global, id)
+        // и дёргает fetchChat({type:'user'}) (src/global/actions/api/chats.ts:250-259).
+        // Пользователи попадают в стейт куда шире диалогов (отправители сообщений,
+        // контакты, поиск), поэтому проверка только по selectChat отсекала бы
+        // пиров, которые на самом деле открылись бы.
+        const global = getGlobal();
+        if (!selectChat(global, msg.peerId) && !selectUser(global, msg.peerId)) {
           sendToParent({
             type: 'openPeerResult', peerId: msg.peerId, ok: false, reason: 'chat_not_loaded',
           });

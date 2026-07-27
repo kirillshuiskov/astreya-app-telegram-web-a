@@ -85,6 +85,7 @@ vi.mock('../../index', () => ({
 vi.mock('../../selectors', () => ({
   selectChat: vi.fn(),
   selectCurrentChat: vi.fn(),
+  selectUser: vi.fn(),
 }));
 
 type OpenPeerMsg = { peerId: string; username?: string };
@@ -96,6 +97,7 @@ describe('initial.ts proxy-mode bridge handlers', () => {
   let addActionHandlerMock: ReturnType<typeof vi.fn>;
   let selectChatMock: ReturnType<typeof vi.fn>;
   let selectCurrentChatMock: ReturnType<typeof vi.fn>;
+  let selectUserMock: ReturnType<typeof vi.fn>;
   let mockActions: { openChatByUsername: ReturnType<typeof vi.fn>; openChat: ReturnType<typeof vi.fn> };
 
   let openPeerHandler: (msg: OpenPeerMsg) => void;
@@ -115,6 +117,7 @@ describe('initial.ts proxy-mode bridge handlers', () => {
     addActionHandlerMock = globalIndex.addActionHandler as unknown as ReturnType<typeof vi.fn>;
     selectChatMock = selectors.selectChat as unknown as ReturnType<typeof vi.fn>;
     selectCurrentChatMock = selectors.selectCurrentChat as unknown as ReturnType<typeof vi.fn>;
+    selectUserMock = selectors.selectUser as unknown as ReturnType<typeof vi.fn>;
 
     mockActions = {
       openChatByUsername: vi.fn(() => Promise.resolve()),
@@ -142,6 +145,7 @@ describe('initial.ts proxy-mode bridge handlers', () => {
     mockActions.openChat.mockClear();
     selectChatMock.mockReset();
     selectCurrentChatMock.mockReset();
+    selectUserMock.mockReset();
     (globalThis as any).__tgProxyBridge = true;
   });
 
@@ -190,6 +194,7 @@ describe('initial.ts proxy-mode bridge handlers', () => {
 
     it('id branch: known chat opens via openChat and reports ok:true', async () => {
       selectChatMock.mockReturnValue({ id: '42' });
+      selectUserMock.mockReturnValue(undefined);
 
       openPeerHandler({ peerId: '42' });
 
@@ -199,8 +204,25 @@ describe('initial.ts proxy-mode bridge handlers', () => {
       expect(sendToParentMock).toHaveBeenCalledWith({ type: 'openPeerResult', peerId: '42', ok: true });
     });
 
-    it('id branch: chat not in the loaded list reports chat_not_loaded and does not call openChat', async () => {
+    it('id branch: chat missing but user known still opens via openChat and reports ok:true (widened gate)', async () => {
+      // openChat self-heals when the chat isn't loaded yet but the user is known:
+      // it falls back to selectUser + fetchChat({type:'user'}) (chats.ts:250-259).
+      // Users are far more commonly present in state than chats (message senders,
+      // contacts, search results), so the gate must not reject on selectChat alone.
       selectChatMock.mockReturnValue(undefined);
+      selectUserMock.mockReturnValue({ id: '42' });
+
+      openPeerHandler({ peerId: '42' });
+
+      await vi.waitFor(() => expect(sendToParentMock).toHaveBeenCalled());
+
+      expect(mockActions.openChat).toHaveBeenCalledWith({ id: '42' });
+      expect(sendToParentMock).toHaveBeenCalledWith({ type: 'openPeerResult', peerId: '42', ok: true });
+    });
+
+    it('id branch: both chat and user missing reports chat_not_loaded and does not call openChat', async () => {
+      selectChatMock.mockReturnValue(undefined);
+      selectUserMock.mockReturnValue(undefined);
 
       openPeerHandler({ peerId: '99' });
 
