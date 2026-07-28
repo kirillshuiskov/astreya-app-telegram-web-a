@@ -2,13 +2,14 @@ import {
   beforeAll, beforeEach, describe, expect, it, vi,
 } from 'vitest';
 
-// `initial.ts` pulls in a large chunk of the app's dependency graph (GramJS worker
-// connector, IndexedDB stores, BroadcastChannel-based multiaccount bookkeeping, etc.)
-// through modules it never actually invokes at import time for the two handlers under
-// test here (`openPeer`, `processOpenChatOrThread`). None of that machinery is exercised
-// by this file — `addActionHandler`/`onParentMessage` are mocked to just *register*
-// handlers, so their real bodies never run. Mocking every direct import at this seam
-// keeps the test isolated and deterministic without touching production code.
+// `initial.ts` тянет за собой большой кусок зависимостей приложения (GramJS worker
+// connector, IndexedDB-стор, BroadcastChannel-бухгалтерия мультиаккаунта и т.п.)
+// через модули, которые ни разу не вызываются при импорте для двух хендлеров,
+// проверяемых здесь (`openPeer`, `processOpenChatOrThread`). Ни одна из этих машин
+// в тесте не задействуется — `addActionHandler`/`onParentMessage` замоканы так,
+// чтобы только *регистрировать* хендлеры, их реальные тела не выполняются.
+// Мокаем каждый прямой импорт на этом шве — тест остаётся изолированным и
+// детерминированным, продакшен-код не трогаем.
 vi.mock('../../../types', () => ({ ManagementProgress: { Idle: 0, InProgress: 1, Complete: 2 } }));
 vi.mock('../../../config', () => ({
   CUSTOM_BG_CACHE_NAME: 'custom-bg',
@@ -17,6 +18,7 @@ vi.mock('../../../config', () => ({
   MEDIA_CACHE_NAME: 'media',
   MEDIA_CACHE_NAME_AVATARS: 'media-avatars',
   MEDIA_PROGRESSIVE_CACHE_NAME: 'media-progressive',
+  TMP_CHAT_ID: '0',
 }));
 vi.mock('../../../util/appBadge', () => ({ updateAppBadge: vi.fn() }));
 vi.mock('../../../util/browser/idb', () => ({ PASSCODE_IDB_STORE: { clear: vi.fn() } }));
@@ -69,8 +71,8 @@ vi.mock('../../reducers/auth', () => ({ updateAuth: vi.fn() }));
 vi.mock('../../selectors/sharedState', () => ({ selectSharedSettings: vi.fn(() => ({})) }));
 vi.mock('../../shared/sharedStateConnector', () => ({ destroySharedStatePort: vi.fn() }));
 
-// Controlled seams: the bridge protocol, the action-dispatch surface and the two
-// selectors the `openPeer` handler consults.
+// Управляемые швы: протокол моста, поверхность диспетчера экшенов и три
+// селектора, которые использует хендлер `openPeer`.
 vi.mock('../../../util/proxyBridge', () => ({
   sendToParent: vi.fn(),
   onParentMessage: vi.fn(),
@@ -104,8 +106,8 @@ describe('initial.ts proxy-mode bridge handlers', () => {
   let processOpenChatOrThreadHandler: ActionHandler;
 
   beforeAll(async () => {
-    // Module-level `if (... __tgConfig?.proxyMode)` gate in initial.ts must see this
-    // before the module is evaluated, exactly like the real host does via __tgConfig.
+    // Модульный гейт `if (... __tgConfig?.proxyMode)` в initial.ts должен увидеть
+    // это до вычисления модуля — точно так же, как реальный host выставляет __tgConfig.
     (window as any).__tgConfig = { proxyMode: true };
 
     const proxyBridge = await import('../../../util/proxyBridge');
@@ -125,8 +127,8 @@ describe('initial.ts proxy-mode bridge handlers', () => {
     };
     (globalIndex.getActions as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockActions);
 
-    // Importing the module under test triggers its top-level registration calls,
-    // which we captured above via the mocked addActionHandler/onParentMessage.
+    // Импорт тестируемого модуля запускает его регистрацию верхнего уровня,
+    // которую мы перехватили выше через замоканные addActionHandler/onParentMessage.
     await import('./initial');
 
     const openPeerCall = onParentMessageMock.mock.calls.find((call: any[]) => call[0] === 'openPeer');
@@ -150,7 +152,7 @@ describe('initial.ts proxy-mode bridge handlers', () => {
   });
 
   describe('openPeer', () => {
-    it('username branch: resolves and reports ok:true once the chat is actually open', async () => {
+    it('ветка username: резолвится и репортит ok:true только когда чат реально открыт', async () => {
       selectCurrentChatMock.mockReturnValue({ id: '42', usernames: [{ username: 'ivan' }] });
 
       openPeerHandler({ peerId: '42', username: 'ivan' });
@@ -162,11 +164,25 @@ describe('initial.ts proxy-mode bridge handlers', () => {
       expect(sendToParentMock).toHaveBeenCalledWith({ type: 'openPeerResult', peerId: '42', ok: true });
     });
 
-    it('username branch: unresolvable username does NOT report ok:true (Finding 1 fix)', async () => {
-      // Production behaviour of openChatByUsername on "user does not exist": it does not
-      // throw — it silently falls back to openPreviousChat + a notification (chats.ts).
-      // The only honest signal is whether the currently open chat actually matches the
-      // requested username after the await settles.
+    it('ветка username: сравнение регистронезависимое — открытый чат матчится с иным регистром username', async () => {
+      // Telegram-юзернеймы регистронезависимы (selectChatByUsername, isCurrentChat
+      // в самом openChatByUsername, chats.ts); хост хранит юзернейм лида как ввели,
+      // без нормализации регистра. Без учёта регистра успешно открытый чат
+      // репортился бы как not_found из-за одной буквы (см. финальное ревью, Finding 1).
+      selectCurrentChatMock.mockReturnValue({ id: '42', usernames: [{ username: 'Ivan_Petrov' }] });
+
+      openPeerHandler({ peerId: '42', username: 'ivan_petrov' });
+
+      await vi.waitFor(() => expect(sendToParentMock).toHaveBeenCalled());
+
+      expect(sendToParentMock).toHaveBeenCalledWith({ type: 'openPeerResult', peerId: '42', ok: true });
+    });
+
+    it('ветка username: нерезолвящийся username НЕ репортит ok:true (Finding 1 предыдущего раунда)', async () => {
+      // Реальное поведение openChatByUsername при "user does not exist": исключение
+      // не бросается — тихий фолбэк на openPreviousChat + уведомление (chats.ts).
+      // Единственный честный сигнал — реально ли открытый чат совпадает с запрошенным
+      // username после того, как await устоялся.
       mockActions.openChatByUsername.mockResolvedValue(undefined);
       selectCurrentChatMock.mockReturnValue({ id: '1', usernames: [{ username: 'someone_else' }] });
 
@@ -181,7 +197,7 @@ describe('initial.ts proxy-mode bridge handlers', () => {
       });
     });
 
-    it('username branch: no currently open chat at all does NOT report ok:true', async () => {
+    it('ветка username: полностью пустой текущий чат тоже НЕ репортит ok:true', async () => {
       mockActions.openChatByUsername.mockResolvedValue(undefined);
       selectCurrentChatMock.mockReturnValue(undefined);
 
@@ -192,7 +208,7 @@ describe('initial.ts proxy-mode bridge handlers', () => {
       expect(sendToParentMock).not.toHaveBeenCalledWith(expect.objectContaining({ ok: true }));
     });
 
-    it('id branch: known chat opens via openChat and reports ok:true', async () => {
+    it('ветка id: известный чат открывается через openChat и репортит ok:true', async () => {
       selectChatMock.mockReturnValue({ id: '42' });
       selectUserMock.mockReturnValue(undefined);
 
@@ -204,11 +220,12 @@ describe('initial.ts proxy-mode bridge handlers', () => {
       expect(sendToParentMock).toHaveBeenCalledWith({ type: 'openPeerResult', peerId: '42', ok: true });
     });
 
-    it('id branch: chat missing but user known still opens via openChat and reports ok:true (widened gate)', async () => {
-      // openChat self-heals when the chat isn't loaded yet but the user is known:
-      // it falls back to selectUser + fetchChat({type:'user'}) (chats.ts:250-259).
-      // Users are far more commonly present in state than chats (message senders,
-      // contacts, search results), so the gate must not reject on selectChat alone.
+    it('ветка id: чата нет, но пользователь известен — всё равно открывается и репортит ok:true (расширенный гейт)', async () => {
+      // openChat умеет восстанавливаться сам, когда чат ещё не загружен, но
+      // пользователь уже известен: берёт selectUser + fetchChat({type:'user'})
+      // (chats.ts:250-259). Пользователи в стейте встречаются гораздо чаще чатов
+      // (отправители сообщений, контакты, поиск), поэтому гейт не должен отсекать
+      // по одному только selectChat.
       selectChatMock.mockReturnValue(undefined);
       selectUserMock.mockReturnValue({ id: '42' });
 
@@ -220,7 +237,7 @@ describe('initial.ts proxy-mode bridge handlers', () => {
       expect(sendToParentMock).toHaveBeenCalledWith({ type: 'openPeerResult', peerId: '42', ok: true });
     });
 
-    it('id branch: both chat and user missing reports chat_not_loaded and does not call openChat', async () => {
+    it('ветка id: и чат, и пользователь отсутствуют — chat_not_loaded, openChat не вызывается', async () => {
       selectChatMock.mockReturnValue(undefined);
       selectUserMock.mockReturnValue(undefined);
 
@@ -234,7 +251,7 @@ describe('initial.ts proxy-mode bridge handlers', () => {
       });
     });
 
-    it('catch path: a thrown error while opening the chat reports reason:error', async () => {
+    it('catch-путь: исключение при открытии чата репортит reason:error', async () => {
       selectChatMock.mockReturnValue({ id: '42' });
       mockActions.openChat.mockImplementation(() => {
         throw new Error('boom');
@@ -252,13 +269,13 @@ describe('initial.ts proxy-mode bridge handlers', () => {
   });
 
   describe('processOpenChatOrThread → peerChanged', () => {
-    it('emits peerChanged with the chat id coerced to a string', () => {
+    it('эмитит peerChanged с chatId, приведённым к строке', () => {
       processOpenChatOrThreadHandler({}, mockActions, { chatId: 123 });
 
       expect(sendToParentMock).toHaveBeenCalledWith({ type: 'peerChanged', peerId: '123' });
     });
 
-    it('stays silent when __tgProxyBridge is not set (non-iframe context)', () => {
+    it('молчит, если __tgProxyBridge не выставлен (контекст не iframe)', () => {
       (globalThis as any).__tgProxyBridge = false;
 
       processOpenChatOrThreadHandler({}, mockActions, { chatId: '123' });
@@ -266,8 +283,19 @@ describe('initial.ts proxy-mode bridge handlers', () => {
       expect(sendToParentMock).not.toHaveBeenCalled();
     });
 
-    it('stays silent when chatId is absent from the payload', () => {
+    it('молчит, если chatId отсутствует в payload', () => {
       processOpenChatOrThreadHandler({}, mockActions, {});
+
+      expect(sendToParentMock).not.toHaveBeenCalled();
+    });
+
+    it('молчит на плейсхолдере TMP_CHAT_ID (Finding 2 финального ревью)', () => {
+      // openChatByUsername синхронно открывает временный пустой чат с id=TMP_CHAT_ID
+      // ('0'), чтобы UI не «подвисал» до резолва реального пира (chats.ts:3878).
+      // Этот TMP-open тоже идёт через processOpenChatOrThread — без фильтра свой же
+      // openPeer(username) слал бы хосту фиктивный peerChanged('0') перед настоящим.
+      // Родной openChat фильтрует эту же константу (chats.ts:236).
+      processOpenChatOrThreadHandler({}, mockActions, { chatId: '0' });
 
       expect(sendToParentMock).not.toHaveBeenCalled();
     });

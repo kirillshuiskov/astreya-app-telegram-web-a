@@ -8,6 +8,7 @@ import {
   MEDIA_CACHE_NAME,
   MEDIA_CACHE_NAME_AVATARS,
   MEDIA_PROGRESSIVE_CACHE_NAME,
+  TMP_CHAT_ID,
 } from '../../../config';
 import { updateAppBadge } from '../../../util/appBadge';
 import { PASSCODE_IDB_STORE } from '../../../util/browser/idb';
@@ -119,8 +120,15 @@ if (typeof window !== 'undefined' && (window as any).__tgConfig?.proxyMode) {
           // openChatByUsername не бросает исключение на "user does not exist" — молча
           // делает openPreviousChat + showNotification (chats.ts). Единственный честный
           // способ узнать исход — проверить, что открытым чатом реально стал запрошенный.
+          // Telegram-юзернеймы регистронезависимы (так же сравнивают selectChatByUsername
+          // и isCurrentChat-проверка в самом openChatByUsername, chats.ts); хост хранит
+          // юзернейм лида как ввели, регистр не нормализует — сравнение без учёта регистра,
+          // иначе успешно открытый чат может репортиться как not_found из-за одной буквы.
           const openedChat = selectCurrentChat(getGlobal());
-          const isResolved = Boolean(openedChat?.usernames?.some((u) => u.username === msg.username));
+          const usernameLowered = msg.username.toLowerCase();
+          const isResolved = Boolean(
+            openedChat?.usernames?.some((u) => u.username.toLowerCase() === usernameLowered),
+          );
           if (!isResolved) {
             sendToParent({
               type: 'openPeerResult', peerId: msg.peerId, ok: false, reason: 'not_found',
@@ -163,6 +171,12 @@ addActionHandler('processOpenChatOrThread', (global, actions, payload): ActionRe
   if (!(globalThis as any).__tgProxyBridge) return;
   const { chatId } = payload;
   if (!chatId) return;
+  // TMP_CHAT_ID — плейсхолдер, которым openChatByUsername открывает пустой чат
+  // синхронно, для скорости отклика UI, до резолва реального пира (chats.ts:3878).
+  // Он тоже проходит через processOpenChatOrThread — свой же openPeer(username)
+  // иначе шлёт хосту фиктивный peerChanged('0') перед настоящим. Родной openChat
+  // фильтрует эту же константу (chats.ts:236).
+  if (chatId === TMP_CHAT_ID) return;
   sendToParent({ type: 'peerChanged', peerId: String(chatId) });
 });
 

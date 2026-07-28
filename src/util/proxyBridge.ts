@@ -17,10 +17,13 @@ export type BridgeMessage =
   | { type: 'mtprotoSenderLogs'; logs: Array<{ level: 'info' | 'warn' | 'error'; message: string; dcId?: number; ts: number }> }
   | { type: 'accountChanged'; accountId: string; ok: boolean; error?: string }
   // Результат host-команды openPeer. ok=false + reason='chat_not_loaded' —
-  // диалога нет в загруженном списке форка (очень старый диалог за пределами
-  // первой страницы getDialogs); host покажет пользователю понятную ошибку
-  // вместо молчаливого «клик ничего не сделал».
-  | { type: 'openPeerResult'; peerId: string; ok: boolean; reason?: string }
+  // форк локально не знает про этого пира вообще (ни диалога, ни пользователя
+  // нет в загруженном стейте: очень старый диалог за пределами первой страницы
+  // getDialogs, либо пир, не встречавшийся в этой сессии); reason='not_found' —
+  // резолв username на сервере не удался («User does not exist»); reason='error' —
+  // необработанное исключение. Host покажет пользователю понятную ошибку вместо
+  // молчаливого «клик ничего не сделал».
+  | { type: 'openPeerResult'; peerId: string; ok: boolean; reason?: 'chat_not_loaded' | 'not_found' | 'error' }
   // В форке открыли другой чат. Шлётся на ЛЮБОЕ открытие, включая клик по
   // нативному списку чатов, — по нему хост гасит кружок в рейле, иначе рейл
   // врёт всякий раз, когда оператор навигируется мимо него.
