@@ -160,6 +160,18 @@ if (typeof window !== 'undefined' && (window as any).__tgConfig?.proxyMode) {
       }
     })();
   });
+
+  // Тема хоста. Форк — отдельный документ со своим <html>, и по умолчанию он следует
+  // СИСТЕМНОЙ теме (shouldUseSystemTheme: true в initialState). Пока хост не скажет
+  // явно, iframe остаётся светлым внутри тёмного приложения — просто потому, что
+  // светлая тема стоит в ОС. Снимаем следование системе и ставим тему хоста;
+  // применение делает штатный диалог настроек (ui/settings.ts → switchTheme).
+  onParentMessage<{ theme: string }>('setTheme', (msg) => {
+    // Мост — публичная postMessage-поверхность same-origin: в shared settings, а
+    // оттуда в кэш, должно попадать только известное значение.
+    if (msg?.theme !== 'light' && msg?.theme !== 'dark') return;
+    getActions().setSharedSettingOption({ theme: msg.theme, shouldUseSystemTheme: false });
+  });
 }
 
 // Сообщаем хосту о смене открытого чата. Обработчиков у processOpenChatOrThread
