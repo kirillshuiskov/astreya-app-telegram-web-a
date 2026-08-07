@@ -36,7 +36,11 @@ export type BridgeIncomingMessage =
   // Открыть диалог с пиром. username, если есть, предпочтительнее: он
   // резолвится на сервере и работает даже для диалога, не попавшего в
   // загруженный список чатов.
-  | { type: 'openPeer'; peerId: string; username?: string };
+  | { type: 'openPeer'; peerId: string; username?: string }
+  // Тема, выбранная в host SPA. Форк живёт в отдельном документе и по умолчанию
+  // следует СИСТЕМНОЙ теме (shouldUseSystemTheme в initialState), поэтому без этой
+  // команды iframe остаётся светлым при тёмном приложении — темы просто не связаны.
+  | { type: 'setTheme'; theme: 'light' | 'dark' };
 
 export type SessionPayload = {
   requestId: string;

@@ -100,9 +100,14 @@ describe('initial.ts proxy-mode bridge handlers', () => {
   let selectChatMock: ReturnType<typeof vi.fn>;
   let selectCurrentChatMock: ReturnType<typeof vi.fn>;
   let selectUserMock: ReturnType<typeof vi.fn>;
-  let mockActions: { openChatByUsername: ReturnType<typeof vi.fn>; openChat: ReturnType<typeof vi.fn> };
+  let mockActions: {
+    openChatByUsername: ReturnType<typeof vi.fn>;
+    openChat: ReturnType<typeof vi.fn>;
+    setSharedSettingOption: ReturnType<typeof vi.fn>;
+  };
 
   let openPeerHandler: (msg: OpenPeerMsg) => void;
+  let setThemeHandler: (msg: { theme?: unknown }) => void;
   let processOpenChatOrThreadHandler: ActionHandler;
 
   beforeAll(async () => {
@@ -124,6 +129,7 @@ describe('initial.ts proxy-mode bridge handlers', () => {
     mockActions = {
       openChatByUsername: vi.fn(() => Promise.resolve()),
       openChat: vi.fn(),
+      setSharedSettingOption: vi.fn(),
     };
     (globalIndex.getActions as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockActions);
 
@@ -134,6 +140,10 @@ describe('initial.ts proxy-mode bridge handlers', () => {
     const openPeerCall = onParentMessageMock.mock.calls.find((call: any[]) => call[0] === 'openPeer');
     if (!openPeerCall) throw new Error('openPeer handler was not registered');
     openPeerHandler = openPeerCall[1];
+
+    const setThemeCall = onParentMessageMock.mock.calls.find((call: any[]) => call[0] === 'setTheme');
+    if (!setThemeCall) throw new Error('setTheme handler was not registered');
+    setThemeHandler = setThemeCall[1];
 
     const processCall = addActionHandlerMock.mock.calls
       .find((call: any[]) => call[0] === 'processOpenChatOrThread');
@@ -148,7 +158,43 @@ describe('initial.ts proxy-mode bridge handlers', () => {
     selectChatMock.mockReset();
     selectCurrentChatMock.mockReset();
     selectUserMock.mockReset();
+    mockActions.setSharedSettingOption.mockClear();
     (globalThis as any).__tgProxyBridge = true;
+  });
+
+  describe('setTheme', () => {
+    // Тема форка и тема хоста живут в разных документах: хост вешает класс на свой
+    // <html>, форк — на свой, и по умолчанию форк слушает СИСТЕМУ
+    // (shouldUseSystemTheme: true в initialState). Пока хост не диктует тему явно,
+    // iframe остаётся светлым при тёмном приложении просто потому, что светлая
+    // тема стоит в ОС.
+    it('применяет тему хоста и снимает следование системной', () => {
+      setThemeHandler({ theme: 'dark' });
+
+      expect(mockActions.setSharedSettingOption).toHaveBeenCalledWith({
+        theme: 'dark',
+        shouldUseSystemTheme: false,
+      });
+    });
+
+    it('принимает light так же явно, как dark', () => {
+      setThemeHandler({ theme: 'light' });
+
+      expect(mockActions.setSharedSettingOption).toHaveBeenCalledWith({
+        theme: 'light',
+        shouldUseSystemTheme: false,
+      });
+    });
+
+    it('игнорирует неизвестное значение темы, не трогая настройки', () => {
+      // Мост — публичная postMessage-поверхность: соседняя вкладка того же origin
+      // может прислать что угодно. Мусор не должен попадать в shared settings, откуда
+      // он уедет в кэш и переживёт перезагрузку.
+      setThemeHandler({ theme: 'sepia' });
+      setThemeHandler({});
+
+      expect(mockActions.setSharedSettingOption).not.toHaveBeenCalled();
+    });
   });
 
   describe('openPeer', () => {
